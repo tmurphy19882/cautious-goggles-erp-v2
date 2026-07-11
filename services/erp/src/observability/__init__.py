@@ -11,6 +11,16 @@ Three small modules, all idempotent on `init_*()`:
 
 The FastAPI middleware that wires request_id + OTel span context into
 `request.state` lives in `observability.middleware`.
-
-Import submodules directly: `from observability.tracing import init_tracing`, etc.
 """
+from observability.logging import init_logging
+from observability.metrics import init_metrics, metrics, reset_metrics_for_testing
+from observability.tracing import init_tracing, tracer
+
+__all__ = [
+    "init_logging",
+    "init_metrics",
+    "init_tracing",
+    "metrics",
+    "reset_metrics_for_testing",
+    "tracer",
+]

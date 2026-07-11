@@ -54,8 +54,11 @@ class User(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     roles: Mapped[list[Role]] = relationship(
+        "Role",
         secondary="user_roles",
         back_populates="users",
+        primaryjoin="User.id == UserRole.user_id",
+        secondaryjoin="Role.id == UserRole.role_id",
         lazy="selectin",
     )
 
@@ -86,8 +89,11 @@ class Role(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     users: Mapped[list[User]] = relationship(
+        "User",
         secondary="user_roles",
         back_populates="roles",
+        primaryjoin="Role.id == UserRole.role_id",
+        secondaryjoin="User.id == UserRole.user_id",
         lazy="selectin",
     )
     permissions: Mapped[list[Permission]] = relationship(
