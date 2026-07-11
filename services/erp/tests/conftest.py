@@ -26,6 +26,7 @@ import subprocess
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import UUID
 
 import httpx
 import pytest
@@ -178,6 +179,32 @@ def admin_headers() -> dict[str, str]:
         "x-tenant-id": DEMO_TENANT_ID,
         "x-user-id": DEMO_ADMIN_USER_ID,
     }
+
+
+# ---------- Per-test session + tenant + user fixtures (W7-W10) ----------
+
+@pytest_asyncio.fixture
+async def session(pg_session_factory) -> AsyncIterator[AsyncSession]:
+    """Yield an `AsyncSession` bound to the test schema.
+
+    Used by the W7-W10 service-level tests that don't go through the
+    HTTP layer.
+    """
+    sf = pg_session_factory
+    async with sf() as s:
+        yield s
+
+
+@pytest.fixture
+def tenant_id() -> UUID:
+    """The seeded demo tenant id (matches migration 0103)."""
+    return UUID(DEMO_TENANT_ID)
+
+
+@pytest.fixture
+def user_id() -> UUID:
+    """The seeded demo admin user id (matches migration 0103)."""
+    return UUID(DEMO_ADMIN_USER_ID)
 
 
 # ---------- FastAPI client fixture ----------

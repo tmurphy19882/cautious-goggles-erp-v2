@@ -32,7 +32,7 @@ from sqlalchemy import text as _sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from identity.deps import require_permission
-from platform.service import (
+from tenant_platform.service import (
     AuditService,
     FeatureFlagService,
     PaymentsService,
@@ -41,8 +41,32 @@ from platform.service import (
     WebhookService,
 )
 from shared.tenant import require_tenant_id
+from shared.errors import UnauthenticatedError
 
 router = APIRouter(prefix="/platform", tags=["platform"])
+
+
+# ---------- system auth (for tenant onboarding) ----------
+
+
+async def require_system_token(request: Request) -> None:
+    """System-token check for the tenant onboarding endpoint.
+
+    Closes P2-1 (2026-07-11 audit): tenant onboarding is a SYSTEM
+    operation; it cannot use `require_permission(...)` because that
+    dep requires a tenant context. Instead, the platform console
+    passes a long-lived service-account token in the
+    `X-Platform-Token` header.
+
+    W6 ships a constant for the W6 happy path. W6.1 swaps it for
+    a real Vault-backed secret + rotation.
+    """
+    import os
+    expected = os.environ.get("PLATFORM_SYSTEM_TOKEN", "dev-platform-token")
+    actual = request.headers.get("x-platform-token")
+    if not actual or actual != expected:
+        raise UnauthenticatedError("x-platform-token header required for system operations")
+    return None
 
 
 # ---------- tenants ----------
@@ -59,14 +83,18 @@ class CreateTenantBody(BaseModel):
     "/tenants",
     status_code=201,
     summary="Provision a new tenant (PL-1)",
-    dependencies=[Depends(require_permission("platform.tenant.write"))],
+    description=(
+        "System operation: requires the `X-Platform-Token` header, "
+        "not `x-tenant-id`. Closes PL-1 + P2-1."
+    ),
+    dependencies=[Depends(require_system_token)],
 )
 async def create_tenant(
     body: CreateTenantBody,
     request: Request,
 ) -> dict[str, Any]:
     # NOTE: tenant onboarding is a SYSTEM operation; it does not
-    # require x-tenant-id. The dep is intentionally omitted.
+    # require x-tenant-id. The dep is `require_system_token`.
     sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
     async with sf() as session:
         svc = TenantOnboardingService(session)
@@ -152,7 +180,7 @@ class CreatePaymentIntentBody(BaseModel):
     "/payments/intents",
     status_code=201,
     summary="Create a payment intent (PL-7)",
-    dependencies=[Depends(require_permission("platform.webhook.write"))],  # close enough
+    dependencies=[Depends(require_permission("platform.payment.write"))],
 )
 async def create_payment_intent(
     body: CreatePaymentIntentBody,

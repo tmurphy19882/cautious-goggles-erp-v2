@@ -38,7 +38,7 @@ from o2c import api as o2c_api
 from o2c.consumers import register_consumers
 from ops import api as ops_api
 from p2p import api as p2p_api
-from platform import api as platform_api
+from tenant_platform import api as platform_api
 from trade import api as trade_api
 from shared.db import create_engine, create_session_factory
 from shared.errors import install_error_handlers
