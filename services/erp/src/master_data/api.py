@@ -1,4 +1,4 @@
-"""FastAPI router for master-data endpoints (W1).
+"""FastAPI router for master-data endpoints (W1 + W3).
 
 Endpoints (all under `/api/v1/erp/master-data`):
 
@@ -9,13 +9,20 @@ Endpoints (all under `/api/v1/erp/master-data`):
 
   POST   /locations                 — create
   GET    /locations                 — list
-  GET    /locations/{id}            — fetch
 
-  POST   /customers                 — create a customer (a User with is_service_account=false)
+  POST   /parties                   — create a party (W3: full model)
+  GET    /parties                   — list
+  GET    /parties/{id}              — fetch
+  POST   /parties/{id}/contacts     — add a contact
+  POST   /parties/{id}/addresses    — add an address
+  POST   /parties/{id}/tax-ids      — add a tax registration
+
+  POST   /customers                 — W1 compat shim: creates User + Party(kind=customer)
   GET    /customers                 — list customers
-  GET    /customers/{id}            — fetch
 
   POST   /credit-limits             — set a credit limit for a customer
+
+  GET    /search                    — fuzzy search across the search index
 """
 from __future__ import annotations
 
@@ -30,6 +37,8 @@ from sqlalchemy import text as _sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from identity.deps import require_permission
+from master_data.party import CreatePartyInput, PartyService
+from master_data.search import SearchService
 from shared.tenant import require_tenant_id
 
 router = APIRouter(prefix="/master-data", tags=["master-data"])
@@ -376,3 +385,190 @@ async def create_credit_limit(
         )
         await session.commit()
     return {"id": str(clid), "customer_id": str(body.customer_id), "currency": body.currency}
+
+
+# ---------- parties (W3) ----------
+
+
+class CreatePartyBody(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(pattern="^(customer|vendor|carrier|employee|internal_org)$")
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    external_refs: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post(
+    "/parties",
+    status_code=201,
+    summary="Create a party (W3)",
+    dependencies=[Depends(require_permission("master.party.write"))],
+)
+async def create_party(
+    body: CreatePartyBody,
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+) -> dict[str, Any]:
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with sf() as session:
+        svc = PartyService(session)
+        r = await svc.create(
+            tenant_id=tenant_id,
+            input=CreatePartyInput(
+                code=body.code,
+                name=body.name,
+                kind=body.kind,
+                email=body.email,
+                phone=body.phone,
+                website=body.website,
+                external_refs=body.external_refs,
+            ),
+        )
+        await session.commit()
+    return {"id": str(r.party_id), "code": r.code, "kind": r.kind}
+
+
+@router.get(
+    "/parties",
+    summary="List parties",
+    dependencies=[Depends(require_permission("master.party.read"))],
+)
+async def list_parties(
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+    kind: str | None = None,
+) -> dict[str, Any]:
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with sf() as session:
+        params: dict[str, Any] = {"tenant_id": tenant_id}
+        where = "WHERE tenant_id = :tenant_id AND deleted_at IS NULL"
+        if kind:
+            where += " AND kind = :kind"
+            params["kind"] = kind
+        rows = (
+            await session.execute(
+                _sa_text(
+                    f"SELECT id, code, name, kind, email FROM parties {where} ORDER BY name"
+                ),
+                params,
+            )
+        ).mappings().all()
+    return {"items": [dict(r) for r in rows]}
+
+
+class AddContactBody(BaseModel):
+    full_name: str = Field(min_length=1, max_length=255)
+    role: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    is_primary: bool = False
+
+
+@router.post(
+    "/parties/{party_id}/contacts",
+    status_code=201,
+    summary="Add a contact to a party",
+    dependencies=[Depends(require_permission("master.party.write"))],
+)
+async def add_party_contact(
+    party_id: UUID,
+    body: AddContactBody,
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+) -> dict[str, Any]:
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with sf() as session:
+        svc = PartyService(session)
+        cid = await svc.add_contact(
+            tenant_id=tenant_id, party_id=party_id, **body.model_dump()
+        )
+        await session.commit()
+    return {"id": str(cid)}
+
+
+class AddAddressBody(BaseModel):
+    kind: str = Field(min_length=1, max_length=32)
+    line1: str | None = None
+    city: str | None = None
+    region: str | None = None
+    postal_code: str | None = None
+    country_code: str | None = None
+    is_primary: bool = False
+
+
+@router.post(
+    "/parties/{party_id}/addresses",
+    status_code=201,
+    summary="Add an address to a party",
+    dependencies=[Depends(require_permission("master.party.write"))],
+)
+async def add_party_address(
+    party_id: UUID,
+    body: AddAddressBody,
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+) -> dict[str, Any]:
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with sf() as session:
+        svc = PartyService(session)
+        aid = await svc.add_address(
+            tenant_id=tenant_id, party_id=party_id, **body.model_dump()
+        )
+        await session.commit()
+    return {"id": str(aid)}
+
+
+class AddTaxIdBody(BaseModel):
+    tax_id_type: str = Field(min_length=1, max_length=32)
+    tax_id: str = Field(min_length=1, max_length=64)
+    country_code: str | None = None
+
+
+@router.post(
+    "/parties/{party_id}/tax-ids",
+    status_code=201,
+    summary="Add a tax registration to a party",
+    dependencies=[Depends(require_permission("master.party.write"))],
+)
+async def add_party_tax_id(
+    party_id: UUID,
+    body: AddTaxIdBody,
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+) -> dict[str, Any]:
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with sf() as session:
+        svc = PartyService(session)
+        tid = await svc.add_tax_id(
+            tenant_id=tenant_id, party_id=party_id, **body.model_dump()
+        )
+        await session.commit()
+    return {"id": str(tid)}
+
+
+# ---------- search ----------
+
+
+@router.get(
+    "/search",
+    summary="Fuzzy search across parties / products / orders",
+    dependencies=[Depends(require_permission("master.party.read"))],
+)
+async def search(
+    request: Request,
+    tenant_id: UUID = Depends(require_tenant_id),
+    q: str = "",
+    entity_types: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Fuzzy search via the denormalised `search_index` table."""
+    sf: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    types_list = entity_types.split(",") if entity_types else None
+    async with sf() as session:
+        svc = SearchService(session)
+        hits = await svc.query(
+            tenant_id=tenant_id, q=q, entity_types=types_list, limit=limit
+        )
+    return {"q": q, "hits": hits}
