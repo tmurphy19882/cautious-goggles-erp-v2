@@ -7,6 +7,10 @@ Usage:
     python services/erp/scripts/smoke_test.py
 
 Exits 0 on full PASS, non-zero on the first failure.
+
+W0 covers /health, /ready, /metrics, /identity/*.
+W1 covers the O2C happy path: customer → product → location → layer
+→ credit limit → SO (multiline) → confirm → run workflow → payment.
 """
 from __future__ import annotations
 
@@ -159,6 +163,127 @@ async def _smoke() -> int:
                     "error envelope has message",
                     "message" in body,
                 )
+
+            # ===================================================================
+            # W1 — O2C happy path
+            # ===================================================================
+            print()
+            print("--- W1: O2C happy path ---")
+
+            # 9. Create a customer.
+            r = await c.post(
+                "/api/v1/erp/master-data/customers",
+                json={"email": "smoke-cust@example.com", "display_name": "Smoke Customer"},
+                headers=auth_headers,
+            )
+            check(
+                "POST /master-data/customers",
+                r.status_code == 201,
+                f"got {r.status_code}",
+            )
+            customer_id = r.json().get("id") if r.status_code == 201 else None
+
+            # 10. Create a product + location + layer.
+            r = await c.post(
+                "/api/v1/erp/master-data/products",
+                json={"sku": "SMOKE-SKU", "name": "Smoke Widget"},
+                headers=auth_headers,
+            )
+            check("POST /master-data/products", r.status_code == 201, f"got {r.status_code}")
+            product_id = r.json().get("id") if r.status_code == 201 else None
+
+            r = await c.post(
+                "/api/v1/erp/master-data/locations",
+                json={"code": "SMOKE-WH", "name": "Smoke WH", "kind": "warehouse"},
+                headers=auth_headers,
+            )
+            check("POST /master-data/locations", r.status_code == 201, f"got {r.status_code}")
+            location_id = r.json().get("id") if r.status_code == 201 else None
+
+            if product_id and location_id:
+                r = await c.post(
+                    f"/api/v1/erp/master-data/products/{product_id}/layers",
+                    json={"location_id": location_id, "quantity": "100", "unit_cost": "5.00"},
+                    headers=auth_headers,
+                )
+                check("POST inventory layer", r.status_code == 201, f"got {r.status_code}")
+
+            # 11. Set a credit limit (high).
+            if customer_id:
+                r = await c.post(
+                    "/api/v1/erp/master-data/credit-limits",
+                    json={"customer_id": customer_id, "currency": "USD", "limit_amount": "100000.00"},
+                    headers=auth_headers,
+                )
+                check("POST /master-data/credit-limits", r.status_code == 201, f"got {r.status_code}")
+
+            # 12. Create a multi-line SO.
+            if customer_id and product_id and location_id:
+                r = await c.post(
+                    "/api/v1/erp/sales-orders",
+                    json={
+                        "customer_id": customer_id,
+                        "currency": "USD",
+                        "lines": [
+                            {
+                                "product_id": product_id,
+                                "sku": "WIDGET-A",
+                                "description": "Line 1",
+                                "quantity": "10",
+                                "unit": "each",
+                                "unit_price": "12.50",
+                                "ship_from_location_id": location_id,
+                            },
+                            {
+                                "product_id": product_id,
+                                "sku": "WIDGET-B",
+                                "description": "Line 2",
+                                "quantity": "5",
+                                "unit": "each",
+                                "unit_price": "12.50",
+                                "ship_from_location_id": location_id,
+                            },
+                        ],
+                    },
+                    headers={**auth_headers, "Idempotency-Key": "smoke-so-1"},
+                )
+                check("POST /sales-orders (multiline)", r.status_code == 201, f"got {r.status_code}")
+                order_id = r.json().get("order_id") if r.status_code == 201 else None
+                if order_id:
+                    check("SO line_count == 2", r.json().get("line_count") == 2)
+                    check("SO total_amount == 187.50", r.json().get("total_amount") == "187.50")
+
+                # 13. Confirm.
+                r = await c.post(
+                    f"/api/v1/erp/sales-orders/{order_id}/confirm",
+                    headers=auth_headers,
+                )
+                check("POST /sales-orders/{id}/confirm", r.status_code == 200, f"got {r.status_code}")
+                check("SO status == confirmed", r.json().get("status") == "confirmed")
+
+                # 14. Run the workflow (sync invoice generation).
+                r = await c.post(
+                    f"/api/v1/erp/sales-orders/{order_id}/run-workflow",
+                    headers=auth_headers,
+                )
+                check("POST /sales-orders/{id}/run-workflow", r.status_code == 200, f"got {r.status_code}")
+                if r.status_code == 200:
+                    check("workflow final_status == invoiced", r.json().get("final_status") == "invoiced")
+                    check("workflow published events", r.json().get("events_published", 0) >= 2)
+                    invoice_id = r.json().get("invoice_id")
+                else:
+                    invoice_id = None
+
+                # 15. Apply a payment.
+                if invoice_id:
+                    r = await c.post(
+                        f"/api/v1/erp/sales-orders/{order_id}/payments",
+                        json={"invoice_id": invoice_id, "amount": "187.50"},
+                        headers=auth_headers,
+                    )
+                    check("POST /sales-orders/{id}/payments", r.status_code == 200, f"got {r.status_code}")
+                    if r.status_code == 200:
+                        check("payment applied_amount == 187.50", r.json().get("applied_amount") == "187.50")
 
             print()
             if failures:

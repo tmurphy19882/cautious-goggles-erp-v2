@@ -27,8 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from api import health
 from identity import api as identity_api
+from master_data import api as master_data_api
 from observability import init_logging, init_metrics, init_tracing
 from observability.middleware import ObservabilityMiddleware
+from o2c import api as o2c_api
+from o2c.consumers import register_consumers
 from shared.db import create_engine, create_session_factory
 from shared.errors import install_error_handlers
 from shared.idempotency import DbIdempotencyStore, IdempotencyMiddleware
@@ -60,6 +63,11 @@ def create_app_v2(
         # Touch OTel + metrics so first-request is hot.
         init_tracing(service_name=service_name, otlp_endpoint=otlp_endpoint)
         init_metrics()
+        # Wire the W1 in-process consumers (ship-confirmed, hold,
+        # supplier-suspended). W1.1 swaps the in-process bus for
+        # Kafka and re-registers these against the Kafka consumer
+        # group.
+        register_consumers(session_factory)
         logger.info("erp-v2 starting", extra={"service": service_name, "ts": utcnow().isoformat()})
         try:
             yield
@@ -102,5 +110,7 @@ def create_app_v2(
     # Routers
     app.include_router(health.router)
     app.include_router(identity_api.router, prefix="/api/v1/erp")
+    app.include_router(master_data_api.router, prefix="/api/v1/erp")
+    app.include_router(o2c_api.router, prefix="/api/v1/erp")
 
     return app
