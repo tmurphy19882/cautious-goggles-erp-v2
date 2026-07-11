@@ -79,14 +79,25 @@ async def set_tenant_context(session: AsyncSession, tenant_id: UUID | str | None
     Call this at the start of every request's DB session. Use `SET LOCAL`
     so the setting is transaction-scoped and never leaks across pooled
     connections.
+
+    Closes BUG-003: passing `tenant_id=None` used to set the GUC to the
+    empty string, which the RLS policy then tried to cast as `::uuid` —
+    Postgres raised `invalid input syntax for type uuid`. We now set the
+    GUC to a sentinel UUID that never matches any real tenant row, so
+    system paths (health, bootstrap) get zero rows back instead of an
+    error.
     """
     if tenant_id is None:
-        # No tenant: caller is on a system path (e.g. health check, bootstrap).
-        # We still set the GUC to NULL so RLS policies that compare against
-        # `current_setting('app.tenant_id', true)` return no rows.
-        await session.execute(text("SET LOCAL app.tenant_id = ''"))
+        # Sentinel UUID that no real tenant will ever use. RLS policy in
+        # 0101_identity_rls.py / 0102_idempotency_keys.py falls through to
+        # the same sentinel via COALESCE(NULLIF(...), SENTINEL), so system
+        # paths get a clean "no rows" instead of a uuid cast error.
+        await session.execute(text(f"SET LOCAL app.tenant_id = '{SENTINEL_TENANT_UUID}'"))
         return
     await session.execute(text("SET LOCAL app.tenant_id = :tid"), {"tid": str(tenant_id)})
+
+
+SENTINEL_TENANT_UUID = "00000000-0000-0000-0000-000000000000"
 
 
 @asynccontextmanager

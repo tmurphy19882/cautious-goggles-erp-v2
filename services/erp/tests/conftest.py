@@ -13,6 +13,10 @@ Two flavours:
 
 Tests are kept hermetic: each test gets a fresh schema, RLS is
 enforced, and a known seed user is created with a known role.
+
+Closes BUG-016: autouse fixture resets the OTel log contextvars
+(request_id, span_id, trace_id, tenant_id) between tests so they
+don't leak across the suite.
 """
 from __future__ import annotations
 
@@ -26,13 +30,62 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
+from prometheus_client import CollectorRegistry
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Make `src` importable when pytest runs from the service root.
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+
+# ---------- BUG-016: autouse reset of OTel contextvars ----------
+
+@pytest.fixture(autouse=True)
+def _reset_otel_contextvars() -> AsyncIterator[None]:
+    """Reset the OTel log contextvars between tests so they don't leak.
+
+    The `ObservabilityMiddleware` resets `request_id_var` and `tenant_id_var`
+    in its `finally` block, but `trace_id_var` and `span_id_var` were set
+    *without* tokens and never reset (BUG-016). This fixture does the
+    unconditional reset for all four.
+    """
+    yield  # let the test run
+    try:
+        from observability.logging import (
+            request_id_var,
+            span_id_var,
+            tenant_id_var,
+            trace_id_var,
+        )
+    except ImportError:
+        return
+    for var in (request_id_var, span_id_var, tenant_id_var, trace_id_var):
+        try:
+            var.set(None)  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+
+# ---------- Per-test metrics registry ----------
+
+@pytest.fixture(autouse=True)
+def _reset_metrics_registry() -> AsyncIterator[None]:
+    """Each test gets a fresh Prometheus registry.
+
+    The process-wide `Metrics` singleton is reset so the next call to
+    `metrics()` re-inits with the test's local registry. This keeps the
+    /metrics output deterministic per test.
+    """
+    from observability.metrics import reset_metrics_for_testing
+    reset_metrics_for_testing()
+    test_registry = CollectorRegistry()
+    from observability.metrics import init_metrics
+    init_metrics(registry=test_registry)
+    yield
+    reset_metrics_for_testing()
 
 
 # ---------- DB session fixtures ----------
@@ -66,16 +119,15 @@ async def _run_migrations(database_url: str) -> None:
     )
 
 
+# Fixed UUIDs that match migration 0103_seed_tenant.
+DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+DEMO_ADMIN_USER_ID = "22222222-2222-2222-2222-222222222222"
+DEMO_ADMIN_ROLE_ID = "33333333-3333-3333-3333-333333333333"
+
+
 @pytest_asyncio.fixture
 async def pg_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """Yield a session factory bound to a fresh schema in a test DB.
-
-    Strategy:
-    1. If `ERP_TEST_DATABASE_URL` is set, use it directly. Tests share the
-       DB; each test gets its own schema.
-    2. Else, try to start a `testcontainers[postgres]` container.
-    3. Else, skip.
-    """
+    """Yield a session factory bound to a fresh schema in a test DB."""
     url = _db_url()
     if url is None:
         try:
@@ -111,6 +163,21 @@ async def pg_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]
         finally:
             await _drop_schema(engine, schema)
             await engine.dispose()
+
+
+# ---------- Tenant + admin header fixture (auth shim for W0) ----------
+
+@pytest.fixture
+def admin_headers() -> dict[str, str]:
+    """Headers to call gated routes as the demo admin user.
+
+    The seeded admin user (see migration 0103) has every permission
+    granted, so any `require_permission(...)` dep will pass.
+    """
+    return {
+        "x-tenant-id": DEMO_TENANT_ID,
+        "x-user-id": DEMO_ADMIN_USER_ID,
+    }
 
 
 # ---------- FastAPI client fixture ----------

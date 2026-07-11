@@ -1,10 +1,14 @@
 """FastAPI deps for identity.
 
-- `get_current_principal` — extract the principal from the request.
-  In W0 it accepts a header for testing; W1 will replace this with a
-  proper JWT validator (`x-user-id` + `x-tenant-id` + signed claims).
-- `require_permission(key)` — returns a dep that asserts the principal
-  has `key`. Use as `Depends(require_permission("erp.so.create"))`.
+Closes BUG-009 and BUG-010.
+
+BUG-009: `require_permission` no longer replicates the service-account
+short-circuit and the frozenset check inline. It delegates to
+`PermissionService.assert_can`, so the service-account allow-list fix
+(BUG-006) and the metrics increment both run on every gated route.
+
+BUG-010: the dead `from identity.service import PermissionDenied as _PD`
+import is gone.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ from uuid import UUID
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from identity.service import PermissionService, Principal
+from identity.service import PermissionDenied, PermissionService, Principal
 from shared.errors import PermissionDeniedError, UnauthenticatedError
 from shared.tenant import require_tenant_id
 
@@ -37,8 +41,7 @@ async def get_current_principal(
 ) -> Principal:
     """Resolve the current principal.
 
-    W0 trusts the `x-user-id` header (or returns a synthetic principal
-    for service-account paths). W1 replaces this with a real JWT
+    W0 trusts the `x-user-id` header. W1 replaces this with a real JWT
     validator that pulls `sub` and `tenant_id` from claims.
     """
     user_id_header = request.headers.get("x-user-id")
@@ -60,30 +63,35 @@ async def get_current_principal(
 def require_permission(permission_key: str) -> Callable[..., Awaitable[None]]:
     """Build a FastAPI dep that asserts the principal has `permission_key`.
 
+    Delegates to `PermissionService.assert_can` (BUG-009) so the
+    service-account allow-list (BUG-006) and the metrics increment
+    both run. The dep opens a short-lived session to call the service;
+    the route may also open its own session via `Depends(get_db_session)`
+    and both sessions coexist (the dep's is closed before the route
+    body runs).
+
+    Translates the service's `identity.service.PermissionDenied` to
+    `shared.errors.PermissionDeniedError` so the global error envelope
+    renders a clean 403.
+
     Usage:
 
         @router.post("/sales-orders", dependencies=[Depends(require_permission("erp.so.write"))])
         async def create_so(...): ...
     """
 
-    async def _dep(principal: Principal = Depends(get_current_principal)) -> None:
-        # Re-open a session for the assertion so the dep stays clean even
-        # if the route opens its own session.
-        from identity.service import PermissionDenied as _PD  # avoid circular
-
-        # Use the principal's pre-fetched keys; assert_can here would
-        # double-query the DB. We replicate the logic but with metrics.
-        if not principal.is_service_account:
-            keys = principal.permission_keys or frozenset()
-            if permission_key not in keys:
-                from observability.metrics import metrics
-
-                metrics().permission_denials_total.labels(
-                    permission_key=permission_key, route="-"
-                ).inc()
-                raise PermissionDeniedError(
-                    f"User lacks permission `{permission_key}`",
-                    details={"permission_key": permission_key},
-                )
+    async def _dep(
+        request: Request,
+        principal: Principal = Depends(get_current_principal),
+    ) -> None:
+        session_factory = get_session_factory(request)
+        try:
+            async with session_factory() as session:
+                await PermissionService(session).assert_can(principal, permission_key)
+        except PermissionDenied as exc:
+            raise PermissionDeniedError(
+                f"User lacks permission `{permission_key}`",
+                details={"permission_key": permission_key},
+            ) from exc
 
     return _dep

@@ -1,0 +1,31 @@
+# .dockerignore — keep the build context small.
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Tests + dev artefacts.
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local infra / secrets.
+.env
+.env.*
+*.local.yaml
+secrets/
+
+# Docs (not needed in the image).
+docs/
+trees/
+
+# Build / dist.
+build/
+dist/

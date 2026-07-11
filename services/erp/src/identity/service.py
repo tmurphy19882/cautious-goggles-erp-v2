@@ -5,15 +5,16 @@ Two entry points:
 - `assert_can(principal, permission_key)`: raises `PermissionDenied` if not.
 - `can(principal, permission_key) -> bool`: non-raising.
 
-Permission keys are dotted strings like `erp.so.create`, `erp.so.confirm`,
-`erp.so.cancel`, `erp.invoice.write`, `erp.party.read`. The catalog is
-seeded in the `0100_identity` migration.
+Closes BUG-006 and BUG-018.
 
-Per-tenant roles and role-permission grants are seeded in W6. Until then,
-the `PermissionService` correctly answers "no" for everything *except*
-`identity.*` permissions if a future-wave seed grants them. W0 only
-guarantees the service + tables are present; the per-tenant seeding
-land with W6's tenant-onboarding flow.
+BUG-006: a service account no longer short-circuits to "yes" based on
+the `is_service_account` flag alone. It must also have the requested
+key in its `service_account_scopes` allow-list. Default scope is empty
+(deny). The full per-tenant allow/deny list lands in W6.
+
+BUG-018: `load_principal` is now a single round-trip that joins
+`User → UserRole → Role → RolePermission` and unions the permission
+keys in Python. The N+1 loop is gone.
 """
 from __future__ import annotations
 
@@ -46,6 +47,9 @@ class Principal:
     is_service_account: bool = False
     # Pre-fetched permission keys; if None, the service will hit the DB.
     permission_keys: frozenset[str] | None = None
+    # BUG-006: per-principal allow-list for service accounts. Empty
+    # (deny) by default. Populated by W6's tenant onboarding.
+    service_account_scopes: frozenset[str] = field(default_factory=frozenset)
     extra: dict[str, str] = field(default_factory=dict)
 
 
@@ -61,7 +65,15 @@ class PermissionService:
         user_id: UUID,
         tenant_id: UUID,
     ) -> Principal | None:
-        """Load a principal from the DB, including their effective permissions."""
+        """Load a principal from the DB, including their effective permissions.
+
+        BUG-018: single round-trip join. Two queries (one for the user,
+        one for the union of role permissions). The user query uses
+        `selectinload` for `user.roles` and `role.permissions` so the
+        in-memory union is also computed; we still compute the explicit
+        union here to keep the contract stable (and to be safe if the
+        lazy-load is ever changed).
+        """
         stmt = (
             select(User)
             .where(User.id == user_id, User.tenant_id == tenant_id, User.deleted_at.is_(None))
@@ -70,27 +82,42 @@ class PermissionService:
         if user is None or not user.is_active:
             return None
 
-        # Effective permissions = union of all permissions across the user's roles.
+        # BUG-018: single-query union via the join path that already
+        # exists in `_load_keys`. Soft-deleted roles are excluded.
+        # Inactive users (above) are excluded.
         perm_keys: set[str] = set()
-        for role in user.roles:
-            if role.deleted_at is not None:
-                continue
-            stmt_perms = select(RolePermission.permission_key).where(RolePermission.role_id == role.id)
-            rows = await self._session.execute(stmt_perms)
-            perm_keys.update(r[0] for r in rows.all())
+        from identity.models import UserRole
+        union_stmt = (
+            select(RolePermission.permission_key)
+            .join(Role, Role.id == RolePermission.role_id)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == user.id,
+                User.tenant_id == tenant_id,
+                Role.deleted_at.is_(None),
+                UserRole.user_id == User.id,  # belt-and-braces join sanity
+            )
+            .distinct()
+        )
+        rows = await self._session.execute(union_stmt)
+        perm_keys.update(r[0] for r in rows.all())
 
+        # BUG-006: service-account scopes default to empty (deny). They
+        # are populated by the W6 onboarding flow's per-tenant list.
         return Principal(
             user_id=user.id,
             tenant_id=user.tenant_id,
             is_service_account=user.is_service_account,
             permission_keys=frozenset(perm_keys),
+            service_account_scopes=frozenset(),  # W6 fills this in
         )
 
     async def can(self, principal: Principal, permission_key: str) -> bool:
+        # BUG-006: service-account short-circuit is now gated by an
+        # explicit per-principal allow-list. A bare flag is no longer
+        # enough to grant a permission.
         if principal.is_service_account:
-            # Service accounts have *all* permissions by default. W6's tenant
-            # onboarding may add an explicit allow/deny list per connector.
-            return True
+            return permission_key in principal.service_account_scopes
         keys = principal.permission_keys
         if keys is None:
             keys = await self._load_keys(principal)

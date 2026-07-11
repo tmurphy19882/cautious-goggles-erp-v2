@@ -28,6 +28,7 @@ class Metrics:
     """Container for all ERP v2 metrics. Use the module-level `METRICS`."""
 
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        self._registry = registry
         self.http_requests_total = Counter(
             "http_requests_total",
             "HTTP requests handled, labelled by method/route/status/tenant",
@@ -75,13 +76,28 @@ class Metrics:
 
 
 _default: Metrics | None = None
+_default_registry: CollectorRegistry | None = None
 
 
 def init_metrics(registry: CollectorRegistry | None = None) -> Metrics:
-    """Idempotent init. Returns the process-wide `Metrics` instance."""
-    global _default
+    """Idempotent init. Returns the process-wide `Metrics` instance.
+
+    Closes BUG-014: if a second call passes a different non-None
+    registry, raise immediately. Tests that need isolated registries
+    should call `init_metrics(my_registry)` exactly once and then use
+    `metrics()` for the rest of the test.
+    """
+    global _default, _default_registry
     if _default is None:
         _default = Metrics(registry=registry)
+        _default_registry = registry
+        return _default
+    if registry is not None and _default_registry is not registry:
+        raise RuntimeError(
+            f"init_metrics called with a different registry "
+            f"({registry!r} != {_default_registry!r}); metrics are a process singleton. "
+            "If you need isolated metrics in tests, call init_metrics(registry) once at the start."
+        )
     return _default
 
 
@@ -90,3 +106,27 @@ def metrics() -> Metrics:
     if _default is None:
         return init_metrics()
     return _default
+
+
+def reset_metrics_for_testing() -> None:
+    """Reset the metrics singleton.
+
+    Tests call this in an autouse fixture so each test gets a fresh
+    `Metrics` instance bound to its own registry. Production code
+    should never call this.
+    """
+    global _default, _default_registry
+    _default = None
+    _default_registry = None
+
+
+def reset_metrics_for_testing() -> None:
+    """Test seam: drop the singleton so the next `metrics()` call re-inits.
+
+    Per-test isolation: the conftest fixture calls this between tests so
+    the per-test registry (with `prometheus_client.CollectorRegistry()`)
+    doesn't accumulate state across the suite.
+    """
+    global _default, _default_registry
+    _default = None
+    _default_registry = None

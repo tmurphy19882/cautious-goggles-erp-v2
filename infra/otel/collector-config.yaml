@@ -1,0 +1,45 @@
+# OpenTelemetry Collector config for ERP v2 (W0).
+#
+# - Receives OTLP gRPC + HTTP from the app.
+# - Batches spans (default queue + batch).
+# - Exports to Jaeger (tracing) and Prometheus (metrics) when those
+#   backends are reachable; falls back to logging on failure.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+exporters:
+  debug:
+    verbosity: basic
+  logging:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging]

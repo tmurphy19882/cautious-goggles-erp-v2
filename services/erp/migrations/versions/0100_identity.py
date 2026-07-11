@@ -26,7 +26,6 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-    op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
 
     op.create_table(
         "users",
@@ -60,7 +59,6 @@ def upgrade() -> None:
 
     op.create_table(
         "permissions",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
         sa.Column("key", sa.String(128), primary_key=True),  # global, not tenant-scoped (e.g. "erp.so.create")
         sa.Column("resource", sa.String(64), nullable=False),
         sa.Column("action", sa.String(32), nullable=False),

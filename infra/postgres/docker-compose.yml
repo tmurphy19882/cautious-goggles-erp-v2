@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: erp-v2-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - erp-v2-postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The application connects to Postgres as the `erp` role with full
+  # privileges on the `public` schema (see init.sql). Migrations create
+  # the per-service tables. The app user is provisioned by running:
+  #   psql -h localhost -U postgres -c "CREATE ROLE erp LOGIN PASSWORD 'erp' SUPERUSER;"
+  # once, on a fresh cluster. (SUPERUSER is the W0 bootstrap; tighten
+  # to least-privilege in W6.)
+
+volumes:
+  erp-v2-postgres-data:
+    name: erp-v2-postgres-data
