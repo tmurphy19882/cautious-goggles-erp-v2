@@ -1,13 +1,10 @@
-"""ERP v2 — placeholder.
+"""ERP v2 — `uvicorn src.app:app` entry point.
 
-Real implementation lands in waves per `docs/SPEC.md`.
-This file exists so `uvicorn src.app:app` doesn't 404 in CI smoke tests
-before W0 lands.
+Re-exports `create_app_v2()` from `api.main` so the common command
+`uvicorn src.app:app --reload --port 8001` works out of the box.
 """
 from __future__ import annotations
 
+from api.main import create_app_v2
 
-def create_app_v2():  # pragma: no cover - placeholder
-    raise NotImplementedError(
-        "ERP v2 is not implemented yet. See docs/SPEC.md for the wave plan."
-    )
+app = create_app_v2()
