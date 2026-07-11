@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+*.so
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.env
+.env.*
+!.env.example
+*.sqlite
+*.db
+.venv/
+venv/
+env/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+*.tsbuildinfo
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs / local artifacts
+*.log
+logs/
+.tmp/
+.cache/
+
+# Test artifacts
+playwright-report/
+playwright/.cache/
+
+# Supabase / generated
+supabase/.branches/

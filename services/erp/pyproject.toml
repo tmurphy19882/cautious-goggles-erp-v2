@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "erp-v2"
+version = "0.0.0"
+description = "ERP service v2 — rebuild of cautious-goggles/services/erp per docs/SPEC.md"
+readme = "../../../README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Trevor Murphy" }]
+
+# Real deps land in their wave PRs. W0 will add:
+# fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic, pydantic>=2,
+# opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-otlp,
+# prometheus-client, structlog, temporalio, aiokafka, httpx, pyjwt
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "types-python-dateutil",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "ASYNC", "S", "RUF"]
+ignore = ["S101"]  # asserts in tests
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "contract: pact-style contract tests against other services",
+    "integration: requires running infra (Postgres, Kafka)",
+    "unit: pure unit tests, no infra",
+]
