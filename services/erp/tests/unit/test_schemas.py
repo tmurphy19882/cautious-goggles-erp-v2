@@ -9,8 +9,10 @@ from shared.schemas import AppModel, MoneyDecimal, utcnow
 
 def test_money_decimal_rejects_float() -> None:
     # Decimal is required; float is intentionally not accepted by the type.
+    # Pydantic's decimal_places=4 validates the upper bound but does not pad.
+    from decimal import Decimal
     m = MoneyDecimal(value="10.50", currency="USD")
-    assert str(m.value) == "10.5000"
+    assert m.value == Decimal("10.50")
     assert m.currency == "USD"
 
 

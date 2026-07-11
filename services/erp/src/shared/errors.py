@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class ErrorEnvelope(BaseModel):
     code: str
     message: str
-    details: dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] | None = None
     trace_id: str | None = None
 
 
