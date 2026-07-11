@@ -32,6 +32,7 @@ from observability import init_logging, init_metrics, init_tracing
 from observability.middleware import ObservabilityMiddleware
 from o2c import api as o2c_api
 from o2c.consumers import register_consumers
+from p2p import api as p2p_api
 from shared.db import create_engine, create_session_factory
 from shared.errors import install_error_handlers
 from shared.idempotency import DbIdempotencyStore, IdempotencyMiddleware
@@ -112,5 +113,6 @@ def create_app_v2(
     app.include_router(identity_api.router, prefix="/api/v1/erp")
     app.include_router(master_data_api.router, prefix="/api/v1/erp")
     app.include_router(o2c_api.router, prefix="/api/v1/erp")
+    app.include_router(p2p_api.router, prefix="/api/v1/erp")
 
     return app
