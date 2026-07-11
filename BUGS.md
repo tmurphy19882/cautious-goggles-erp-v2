@@ -11,21 +11,47 @@
 >
 > **Status key:** `confirmed` = reproduced or directly observable; `suspected` =
 > inferred from code shape.
+>
+> **Merge-gate key:**
+> - **BEFORE-MERGE** — must be fixed on `feat/erp-v2-w0-foundations` before the
+>   W0 PR lands in the parent (`cautious-goggles/feat/erp-crm`). The W0
+>   deliverable is observably broken on day 1 if not fixed.
+> - **BEFORE-W1** — acceptable to ship to the parent as a known W0 gap; **must**
+>   be fixed before the `feat/erp-v2-w1-o2c-complete` branch starts, because W1
+>   implementation trips over it.
+> - **P1 / P2** — see per-bug note; not merge-blocking.
 
 ## Summary
 
-| Severity | Count |
-|----------|------:|
-| P0       |     8 |
-| P1       |    12 |
-| P2       |    10 |
-| **Total**| **30** |
+| Severity | Count | Before-merge | Before-W1 |
+|----------|------:|-------------:|----------:|
+| P0       |     8 |            7 |         1 |
+| P1       |    12 |            0 |        12 |
+| P2       |    10 |            0 |        10 |
+| **Total**| **30** |           **7** |     **23** |
+
+### P0 merge-gate at a glance (read this first if you're T2)
+
+| Bug | Gate | One-line reason |
+|-----|------|-----------------|
+| BUG-001 | **BEFORE-MERGE** | every mutating request crashes on a fresh DB |
+| BUG-002 | **BEFORE-MERGE** | fixes BUG-001; without it the table is unjoinable |
+| BUG-003 | **BEFORE-MERGE** | `/ready` 5xx's on any system path that opens a session with no tenant |
+| BUG-004 | **BEFORE-W1**   | WAVE_0 explicitly marks outbox check as informational; W1 publishes so this becomes a hard gate |
+| BUG-005 | **BEFORE-MERGE** | first `session.get(Permission, key)` raises `InvalidRequestError` |
+| BUG-006 | **BEFORE-MERGE** | privilege-escalation vector against any service account on day 1 |
+| BUG-007 | **BEFORE-MERGE** | observability is the W0 deliverable; spans are no-ops on the first request |
+| BUG-008 | **BEFORE-MERGE** | type churn surfaces as a 422 on the first malformed UUID in `x-tenant-id` |
+
+T2 recommended batching order: **001 + 002** (one migration), then **003**,
+then **005**, then **006** (with a per-tenant allow-list scaffold), then
+**007**, then **008**. **004** is W1's job; do not block the W0 merge on it.
 
 ---
 
 ## P0 — Blocks correct behavior
 
-### BUG-001 · `idempotency_keys` table is referenced in code but no migration creates it  · **P0** · `confirmed`
+### BUG-001 · `idempotency_keys` table is referenced in code but no migration creates it  · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** `services/erp/src/shared/idempotency.py:95-105` (Table reflection) and `services/erp/src/shared/idempotency.py:160-178` (`pg_insert` / `sqlite_insert`).
 - **What's wrong:** the `DbIdempotencyStore` declares a `Table("idempotency_keys", ...)` against `Base.metadata` and executes `INSERT` / `SELECT` / `DELETE` against it on every mutating request, but **no migration in `services/erp/migrations/versions/` ever creates that table**. `0100_identity.py` covers users/roles/permissions/user_roles/role_permissions only; `0101_identity_rls.py` only enables RLS on the identity tables. On a fresh DB the first `POST` will fail with `UndefinedTableError: relation "idempotency_keys" does not exist`. The wave summary explicitly claims "The DB and `idempotency_keys` table are ready" — that claim is false.
 - **Fix:** add a new migration `0102_idempotency_keys.py` that does
@@ -43,22 +69,22 @@
   ```
   And in `0101_identity_rls.py` (or a new follow-up) add `ENABLE/FORCE ROW LEVEL SECURITY` plus a `tenant_id = current_setting('app.tenant_id', true)::uuid` policy so idempotency records are tenant-scoped.
 
-### BUG-002 · `idempotency_keys.tenant_id` column is `String`, should be `UUID` · **P0** · `confirmed`
+### BUG-002 · `idempotency_keys.tenant_id` column is `String`, should be `UUID` · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** `services/erp/src/shared/idempotency.py:98` — `Column("tenant_id", String, primary_key=True)`.
 - **What's wrong:** every other tenant-scoped table (`users`, `roles`, `role_permissions`, `user_roles`, and all future tables per SPEC §2 "Multi-tenancy") uses `UUID NOT NULL`. Storing `tenant_id` as `String` here means the `idempotency_keys` row cannot be joined to any other tenant-scoped table without an explicit cast, the table will not be picked up by tenant-id indexes, and the value comparison `IdempotencyKeyTable.c.tenant_id == str(tenant_id)` (line 117) silently discards the type guarantee. Once BUG-001's migration is added, this column needs to be `postgresql.UUID(as_uuid=True)` so that RLS on it (see BUG-001 fix) works the same as the rest of the schema.
 - **Fix:** in the new migration from BUG-001, declare the column as `postgresql.UUID(as_uuid=True)`, primary-key composite with `key_hash`. Drop the `str(tenant_id)` cast on line 117 — pass the `UUID` directly.
 
-### BUG-003 · `set_tenant_context(None)` writes empty string to GUC, which then breaks RLS `::uuid` cast · **P0** · `confirmed`
+### BUG-003 · `set_tenant_context(None)` writes empty string to GUC, which then breaks RLS `::uuid` cast · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** `services/erp/src/shared/db.py:87` — `await session.execute(text("SET LOCAL app.tenant_id = ''"))`.
 - **What's wrong:** the RLS policy in `0101_identity_rls.py:35` does `tenant_id = current_setting('app.tenant_id', true)::uuid`. `current_setting(..., true)` returns the empty string (not NULL) when the GUC is set to `''`. Postgres then tries `''::uuid` which raises `invalid input syntax for type uuid`. Result: any read or write on a tenant-scoped table from a session that called `set_tenant_context(session, None)` (e.g. a bootstrap / health probe that goes through the session factory) will throw. The docstring on `set_tenant_context` claims this path "return[s] no rows" — in practice it errors.
 - **Fix:** either (a) use `SET LOCAL app.tenant_id = NULL` (needs `SET LOCAL ... = NULL` syntax which Postgres allows) and update the RLS policy to handle NULL cleanly, or (b) change the policy to `tenant_id::text = current_setting('app.tenant_id', true)` with the cast guarded, or (c) introduce a sentinel UUID like `'00000000-0000-0000-0000-000000000000'` for "no tenant" and check `current_setting('app.tenant_id', true) <> '' AND tenant_id = current_setting('app.tenant_id', true)::uuid`. Option (a) is cleanest.
 
-### BUG-004 · `/ready` does not actually validate the outbox table · **P0** · `confirmed`
+### BUG-004 · `/ready` does not actually validate the outbox table · **P0** · `confirmed` · **Gate: BEFORE-W1**
 - **Where:** `services/erp/src/api/health.py:32-62`.
 - **What's wrong:** the route docstring (line 7) and wave doc (line 64 of `WAVE_0_FOUNDATIONS.md`) promise "checks DB + outbox + Kafka". The implementation only runs `SELECT 1` against the DB and then **hardcodes** `"status": "ok", "note": "no outbox poller yet (W0)"` for both outbox and Kafka. There is no `SELECT 1 FROM outbox_events LIMIT 1` (or even a check that the table exists). If the outbox migration is missing, the orchestrator's readiness probe will still report 200 and route traffic to a service that cannot publish. The "informational until W1" comment is fine, but the W0 contract should be honest: don't call it "checks" if it doesn't check.
 - **Fix:** either drop the `outbox` and `kafka_producer` keys from the response until W1, or run `await session.execute(text("SELECT to_regclass('public.outbox_events')"))` and only mark `"status": "ok"` if the result is non-NULL.
 
-### BUG-005 · `permissions` migration declares composite PK `(id, key)` but ORM model declares `key` as sole PK · **P0** · `confirmed`
+### BUG-005 · `permissions` migration declares composite PK `(id, key)` but ORM model declares `key` as sole PK · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** migration `services/erp/migrations/versions/0100_identity.py:61-70` vs model `services/erp/src/identity/models.py:99-108`.
 - **What's wrong:** the migration has
   ```python
@@ -73,17 +99,17 @@
   — single-column PK on `key`. After `alembic upgrade head` the DB has `(id, key)` PK; any `session.get(Permission, "erp.so.write")` or `session.merge(...)` will fail because SQLAlchemy expects `key` to be the only PK and will not supply `id`. The catalog read at `identity/api.py:45` (`select(Permission).order_by(...)`) will work, but any code that does `session.get(Permission, key)` will hit `InvalidRequestError`. This is a latent landmine for W1+ when the first write path touches `Permission`.
 - **Fix:** in the migration, drop the `id` column and the `primary_key=True` flag on it (or set `id` to `unique=True, nullable=False` instead). The model is correct: `key` is the natural PK for a global catalog.
 
-### BUG-006 · Service accounts are granted *all* permissions unconditionally · **P0** · `confirmed`
+### BUG-006 · Service accounts are granted *all* permissions unconditionally · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** `services/erp/src/identity/service.py:90-93`.
 - **What's wrong:** `if principal.is_service_account: return True` — any flag set in JWT `is_service_account` claim (or, in W0, any DB row with `is_service_account=true`) bypasses the entire permission catalog. A single compromised service-account token can do any operation the API exposes. The wave summary acknowledges this is a placeholder for W6, but as shipped it is a privilege-escalation vector against any future endpoint.
 - **Fix (minimal W0):** require an explicit allow-list on the principal: `if principal.is_service_account: return permission_key in principal.service_account_scopes`. Then `Principal` carries `service_account_scopes: frozenset[str] = frozenset()`. Default scope is empty (deny). The full W6 work can then add the per-tenant allow/deny list.
 
-### BUG-007 · `ObservabilityMiddleware` resolves tracer in `__init__` before `init_tracing()` runs in lifespan · **P0** · `confirmed`
+### BUG-007 · `ObservabilityMiddleware` resolves tracer in `__init__` before `init_tracing()` runs in lifespan · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:** `services/erp/src/observability/middleware.py:40` (middleware init) vs `services/erp/src/api/main.py:61` (lifespan calls `init_tracing`).
 - **What's wrong:** `self._tracer = trace.get_tracer(service_name)` is called when the middleware is constructed — which is *before* `app.router.lifespan_context` runs `init_tracing()`. Until lifespan fires, `trace.get_tracer` returns a no-op proxy tracer. The first request after boot (which often arrives before the lifespan has fully completed in test setups that bypass lifespan) will produce no spans. Once lifespan does run and calls `trace.set_tracer_provider(provider)`, the previously-obtained tracer reference is *still* a proxy in some OTel SDK versions (depends on the version pinned in `pyproject.toml:27-29` — `>=1.27`). On top of that, BUG-022 below means we don't even go through the `observability.tracing.tracer()` helper.
 - **Fix:** use `observability.tracing.tracer(service_name)` (which goes through the singleton provider) and resolve the tracer per-request inside `dispatch()` rather than caching in `__init__`. Or, in `__init__`, call `init_tracing(service_name=service_name)` so the provider is set before any request hits.
 
-### BUG-008 · Tenant-id is sometimes `UUID`, sometimes `str`, sometimes `Any`; same value passes through 4 type systems · **P0** · `confirmed`
+### BUG-008 · Tenant-id is sometimes `UUID`, sometimes `str`, sometimes `Any`; same value passes through 4 type systems · **P0** · `confirmed` · **Gate: BEFORE-MERGE**
 - **Where:**
   - `services/erp/src/observability/middleware.py:54-56` — `request.state.tenant_id = request.headers.get("x-tenant-id")` (raw `str | None`)
   - `services/erp/src/shared/tenant.py:18` — `return getattr(request.state, "tenant_id", None)` annotated `-> UUID | None` (lies)
@@ -244,15 +270,26 @@ These were called out in the audit brief but, on close reading, are not actually
 
 ## Quick-fix priority (for the W0 hotfix PR)
 
-If the goal is to land the smallest diff that makes the W0 deliverable correct, this is the order I'd batch:
+If the goal is to land the smallest diff that makes the W0 deliverable correct, this is the order I'd batch. The numbers reference the **Gate: BEFORE-MERGE** tags above; BUG-004 is intentionally omitted because it is **BEFORE-W1**, not blocking the W0 merge.
 
 1. **BUG-001 + BUG-002** (one migration) — `idempotency_keys` table with proper UUID column
 2. **BUG-003** — fix `set_tenant_context(None)` so RLS doesn't blow up
 3. **BUG-005** — drop `id` PK from the `permissions` table
-4. **BUG-007 + BUG-022** — route the middleware through `observability.tracing.tracer()` and call `init_tracing()` in `__init__`
-5. **BUG-008** — settle the tenant-id type contract
-6. **BUG-019** — use `Depends(require_tenant_id)` in `identity/api.py`
-7. **BUG-012 + BUG-025** — reconcile `docs/openapi/.gitignore` and add the CI step
-8. **BUG-016** — add the autouse contextvar-reset fixture
+4. **BUG-006** — gate service-account bypass behind a per-tenant allow-list (minimal W0 fix; full close in W6)
+5. **BUG-007 + BUG-022** — route the middleware through `observability.tracing.tracer()` and call `init_tracing()` in `__init__`
+6. **BUG-008** — settle the tenant-id type contract
+7. **BUG-019** — use `Depends(require_tenant_id)` in `identity/api.py` (rolls up under the BUG-008 fix)
+8. **BUG-012 + BUG-025** — reconcile `docs/openapi/.gitignore` and add the CI step
+9. **BUG-016** — add the autouse contextvar-reset fixture
 
-Everything else is a separate PR.
+Everything else (including BUG-004, the outbox `/ready` check) is a separate PR — BUG-004 lands with W1, the rest of the P1/P2 backlog is W0.1 polish.
+
+### Cross-reference: ADOPT_NOW.md (deep-research track)
+
+If the deep-research agent lands `ADOPT_NOW.md` on the same branch, T2 should treat the "Five P0s" punch list in that file as authoritative for the *fix shape* and BUGS.md as authoritative for the *defect catalog*. The two lists should agree on the BEFORE-MERGE items; if they don't, file a follow-up on the parent session before merging. As of this writing, the BEFORE-MERGE set in this file is:
+
+- BUG-001, BUG-002, BUG-003, BUG-005, BUG-006, BUG-007, BUG-008
+
+(7 of 8 P0s; BUG-004 is the explicit W1 follow-up.)
+
+The other 22 findings (P1 + P2) can land in W0.1 or be deferred — T2's call.
