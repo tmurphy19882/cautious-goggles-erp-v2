@@ -3,8 +3,22 @@
 W0 ships only read endpoints (catalog and per-tenant roles).
 Write endpoints (role create, role update, permission grant) come in
 W6 along with the rest of the platform/admin module.
+
+Closes BUG-019 and BUG-021.
+
+BUG-019: route signatures take `tenant_id: UUID = Depends(require_tenant_id)`
+instead of pulling from `request.state.tenant_id`. The dep validates the
+header and exposes a real `UUID`; the route body trusts the dep contract.
+
+BUG-021: `list_permissions` requires `identity.role.read` (same as
+`list_roles`). The catalog is global but the route is no longer
+unauthenticated; an attacker can no longer enumerate every permission
+key the ERP service will ever check.
 """
 from __future__ import annotations
+
+from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
@@ -15,6 +29,7 @@ from identity.deps import get_session_factory, require_permission
 from identity.models import Permission, Role
 from identity.schemas import PermissionRead, RoleRead
 from shared.errors import NotFoundError
+from shared.tenant import require_tenant_id
 
 router = APIRouter(prefix="/identity", tags=["identity"])
 
@@ -36,11 +51,14 @@ def _to_role_read(role: Role) -> RoleRead:
     "/permissions",
     response_model=list[PermissionRead],
     summary="List the global permission catalog",
+    # BUG-021: require identity.role.read. The catalog is global, but
+    # the route is no longer unauthenticated.
+    dependencies=[Depends(require_permission("identity.role.read"))],
 )
 async def list_permissions(
-    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+    request: Request,
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
 ) -> list[PermissionRead]:
-    """The catalog is global, not tenant-scoped, so no `x-tenant-id` required."""
     async with session_factory() as session:
         rows = (await session.execute(select(Permission).order_by(Permission.resource, Permission.action))).scalars().all()
     return [
@@ -56,10 +74,9 @@ async def list_permissions(
     dependencies=[Depends(require_permission("identity.role.read"))],
 )
 async def list_roles(
-    request: Request,
-    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+    tenant_id: Annotated[UUID, Depends(require_tenant_id)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
 ) -> list[RoleRead]:
-    tenant_id = request.state.tenant_id
     async with session_factory() as session:
         stmt = (
             select(Role)
@@ -79,17 +96,14 @@ async def list_roles(
 )
 async def get_role(
     role_id: str,
-    request: Request,
-    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+    tenant_id: Annotated[UUID, Depends(require_tenant_id)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
 ) -> RoleRead:
-    from uuid import UUID as _UUID
-
     try:
-        rid = _UUID(role_id)
+        rid = UUID(role_id)
     except ValueError as exc:
         raise NotFoundError(f"role not found: {role_id}") from exc
 
-    tenant_id = request.state.tenant_id
     async with session_factory() as session:
         stmt = (
             select(Role)

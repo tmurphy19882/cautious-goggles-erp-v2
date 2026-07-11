@@ -7,7 +7,12 @@ re-running the handler.
 
 Scope:
 
-- `tenant_id` + `key` is the dedup key. Two tenants can use the same key.
+- `tenant_id` + `key` is the dedup key. Two tenants can pick the same
+  `Idempotency-Key` string; they don't collide.
+- `key_hash` is `sha256(f"{tenant_id}:{key}")` per ADOPT-1 — adds the
+  tenant into the hash so the same client-generated key produces a
+  different value per tenant (defense-in-depth on top of the
+  composite PK).
 - `request_hash` ensures the same key isn't reused with a *different* body.
 - `response_body` + `status` are replayed verbatim on a hit.
 - `expires_at` is the TTL (default 24h).
@@ -31,6 +36,7 @@ from uuid import UUID
 from fastapi import Request
 from fastapi.responses import Response
 from sqlalchemy import Column, DateTime, Integer, JSON, String, Table, delete, select
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -56,19 +62,15 @@ def _hash_request_body(body: bytes) -> str:
     return hashlib.sha256(body or b"").hexdigest()
 
 
-class IdempotencyRecord:
-    """In-memory shape; matches the `idempotency_keys` table in W0.
-
-    Schema (full migration lands in a later wave; v1 already has the table
-    in `services/erp/src/models.py`):
-
-        tenant_id        UUID
-        key_hash         TEXT
-        request_hash     TEXT
-        response_body    JSONB
-        status           INT
-        expires_at       TIMESTAMPTZ
+def _hash_idempotency_key(key: str, tenant_id: UUID) -> str:
+    """Per ADOPT-1: tenant-prefix the key hash so two tenants that pick
+    the same `Idempotency-Key` value get different `key_hash` values.
     """
+    return hashlib.sha256(f"{tenant_id}:{key}".encode("utf-8")).hexdigest()
+
+
+class IdempotencyRecord:
+    """In-memory shape; matches the `idempotency_keys` table from migration 0102."""
 
     __slots__ = ("tenant_id", "key_hash", "request_hash", "response_body", "status", "expires_at")
 
@@ -91,11 +93,11 @@ class IdempotencyRecord:
 
 # --- SQLAlchemy table reflection (so the store works without a hard model import) ---
 # We declare a lightweight `Table` here rather than an ORM model so the store
-# can be used in W0 before the W1+ migrations add the formal table.
+# can be used in W0 before W1+ ships the formal ORM model.
 IdempotencyKeyTable = Table(
     "idempotency_keys",
     Base.metadata,
-    Column("tenant_id", String, primary_key=True),
+    Column("tenant_id", PG_UUID(as_uuid=True), primary_key=True),
     Column("key_hash", String(64), primary_key=True),
     Column("request_hash", String(64), nullable=False),
     Column("response_body", JSON, nullable=False),
@@ -114,7 +116,7 @@ def _select_idempotency(tenant_id: UUID, key_hash: str):
         IdempotencyKeyTable.c.status,
         IdempotencyKeyTable.c.expires_at,
     ).where(
-        IdempotencyKeyTable.c.tenant_id == str(tenant_id),
+        IdempotencyKeyTable.c.tenant_id == tenant_id,
         IdempotencyKeyTable.c.key_hash == key_hash,
         IdempotencyKeyTable.c.expires_at > utcnow(),
     )
@@ -129,12 +131,7 @@ class IdempotencyStore:
 
 
 class DbIdempotencyStore(IdempotencyStore):
-    """Postgres-backed implementation using the shared session factory.
-
-    Uses raw SQL via SQLAlchemy core (no ORM model required) so the store
-    stays independent of any module's models. The W1+ migrations add the
-    `idempotency_keys` table.
-    """
+    """Postgres-backed implementation using the shared session factory."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._sf = session_factory
@@ -145,6 +142,7 @@ class DbIdempotencyStore(IdempotencyStore):
             r = row.first()
             if r is None:
                 return None
+            # r.tenant_id is a UUID instance thanks to the PG_UUID column type.
             return IdempotencyRecord(
                 tenant_id=r.tenant_id,
                 key_hash=r.key_hash,
@@ -170,7 +168,6 @@ class DbIdempotencyStore(IdempotencyStore):
                 status=record.status,
                 expires_at=record.expires_at,
             )
-            # On conflict: do nothing — the original writer wins.
             stmt = stmt.on_conflict_do_nothing(
                 index_elements=["tenant_id", "key_hash"],
             )
@@ -189,33 +186,34 @@ class DbIdempotencyStore(IdempotencyStore):
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     """FastAPI middleware that enforces Idempotency-Key on mutating routes.
 
-    Caches replays in the store. If a request with the same key + same body
-    comes in within the TTL, returns the original response.
+    Closes BUG-002 (UUID tenant_id), ADOPT-1 (tenant-prefixed hash),
+    BUG-007 (no OTel proxy tracer), BUG-011 (no dead-code path).
 
-    NOTE: this middleware reads the request body and therefore consumes
-    the body stream. Handlers that need to read the body again will
-    receive an empty stream — they must call `await request.body()` only
-    once. Pydantic + FastAPI handle this correctly when the body is read
-    by the route's parameter binding.
+    Set `enabled=False` to bypass in tests where retries are explicitly
+    tested (e.g. testing concurrent inserts without the dedup layer).
     """
 
     MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-    def __init__(self, app, *, store: IdempotencyStore, ttl: timedelta = DEFAULT_TTL) -> None:
+    def __init__(
+        self,
+        app,
+        *,
+        store: IdempotencyStore,
+        ttl: timedelta = DEFAULT_TTL,
+        enabled: bool = True,
+    ) -> None:
         super().__init__(app)
         self._store = store
         self._ttl = ttl
+        self._enabled = enabled
 
     async def dispatch(self, request: Request, call_next):
-        if request.method not in self.MUTATING_METHODS:
+        if not self._enabled or request.method not in self.MUTATING_METHODS:
             return await call_next(request)
 
         key = request.headers.get(IDEMPOTENCY_HEADER)
         if not key:
-            # Allow callers to opt out for non-state-changing requests by
-            # skipping the check on paths registered as idempotent-by-design.
-            if self._is_idempotent_path(request.url.path):
-                return await call_next(request)
             return JSONResponse(
                 status_code=IdempotencyKeyRequiredError.status_code,
                 content={
@@ -224,16 +222,14 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        tenant_id_str = current_tenant_id(request)
-        if tenant_id_str is None:
-            # Tenant middleware should have rejected already; fail loud.
+        tenant_id = current_tenant_id(request)
+        if tenant_id is None:
             return JSONResponse(
                 status_code=400,
                 content={"code": "tenant_required", "message": "x-tenant-id header required"},
             )
-        tenant_id = UUID(str(tenant_id_str))
 
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        key_hash = _hash_idempotency_key(key, tenant_id)
         body = await request.body()
         request_hash = _hash_request_body(body)
 
@@ -249,9 +245,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 )
             return JSONResponse(status_code=existing.status, content=existing.response_body)
 
-        # First time: invoke the handler, capture the response, persist.
         response = await call_next(request)
-        # Only persist 2xx responses; let 4xx/5xx be retried.
         if 200 <= response.status_code < 300:
             response_body_bytes = b""
             async for chunk in response.body_iterator:
@@ -279,9 +273,3 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             )
 
         return response
-
-    @staticmethod
-    def _is_idempotent_path(path: str) -> bool:
-        # Health/ready are GETs, never reach here, but keep the hook
-        # for future opt-outs.
-        return False

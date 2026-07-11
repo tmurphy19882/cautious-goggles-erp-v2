@@ -4,10 +4,17 @@
   Excluded from the observability middleware (no trace, no metrics, no
   tenant resolution). Cheap to call from k8s liveness probes.
 
-- `GET /ready` — readiness. Pings the DB, checks that the outbox table
-  is reachable, and (W1+) reports Kafka producer status. Returns 503
-  with a JSON body describing which dependency is unhealthy so the
-  orchestrator (k8s, ECS, Nomad) can decide what to do.
+- `GET /ready` — readiness. Pings the DB and checks that the outbox
+  table exists (W1+ actually publishes; we just verify the table is
+  there in W0 so the orchestrator's readiness probe reports degraded
+  before traffic is routed). Returns 503 with a JSON body describing
+  which dependency is unhealthy.
+
+Closes BUG-004 (partial): the outbox check actually runs `to_regclass`
+now instead of being a hard-coded "ok" string. The check is still
+informational in W0 (we don't 503 on a missing outbox table — that
+would block the W0 merge since migration 0102+ doesn't ship the table
+until W1). W1 promotes it to a hard gate.
 """
 from __future__ import annotations
 
@@ -31,12 +38,7 @@ async def health() -> dict[str, str]:
 
 @router.get("/ready", summary="Readiness probe")
 async def ready(request: Request, response: Response) -> dict[str, Any]:
-    """Return 200 only if every critical dependency is reachable.
-
-    Always checks the DB. Outbox poller and Kafka producer status are
-    reported as informational fields in W0; they become hard gates in
-    W1 once both are wired in production paths.
-    """
+    """Return 200 only if every critical dependency is reachable."""
     checks: dict[str, dict[str, Any]] = {}
     overall_ok = True
 
@@ -51,8 +53,25 @@ async def ready(request: Request, response: Response) -> dict[str, Any]:
         overall_ok = False
         checks["database"] = {"status": "error", "error": str(exc)}
 
-    # Outbox table (informational until W1 publishes)
-    checks["outbox"] = {"status": "ok", "note": "no outbox poller yet (W0)"}
+    # BUG-004 (partial): the outbox table check now actually runs.
+    # `to_regclass` returns the OID of the relation or NULL if it
+    # doesn't exist. We treat a NULL result as "outbox not yet shipped"
+    # (W0) and report it as informational; W1 promotes to a hard gate.
+    try:
+        session_factory = request.app.state.session_factory
+        async with session_factory() as session:
+            row = (
+                await session.execute(text("SELECT to_regclass('public.outbox_events')"))
+            ).scalar_one()
+        if row is None:
+            checks["outbox"] = {
+                "status": "not_present",
+                "note": "outbox_events table not yet migrated (W0)",
+            }
+        else:
+            checks["outbox"] = {"status": "ok"}
+    except Exception as exc:  # pragma: no cover - depends on env
+        checks["outbox"] = {"status": "error", "error": str(exc)}
 
     # Kafka producer (informational until W1)
     checks["kafka_producer"] = {"status": "ok", "note": "no producer yet (W0)"}

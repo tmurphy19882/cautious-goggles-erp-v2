@@ -32,4 +32,4 @@ services/erp/
 
 ## Current status
 
-W0 not started. `src/app.py` raises `NotImplementedError` to prevent accidental boot.
+W0 done. Boot the app with `uvicorn api.main:app --reload --port 8001`.

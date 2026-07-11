@@ -1,5 +1,8 @@
-"""ERP v2 — placeholder package init.
+"""ERP v2 — package init.
 
-Real `__init__.py` files per module land in their respective wave PRs.
-This file exists so Python recognises `services/erp/src/` as a package.
+Real implementation lands in waves per `docs/SPEC.md`. Submodules:
+shared, observability, identity, api, o2c, p2p, finance, crm, hr, legal,
+trade, platform, ai, master-data.
+
+Import submodules directly: `from shared.errors import ApiError`, etc.
 """

@@ -1,0 +1,52 @@
+# Kafka topic manifest for ERP v2.
+# Each entry is consumed by the W1+ outbox poller / producer and
+# validated against the Avro schema in `packages/shared-events/schemas/`.
+#
+# Convention: `scm.<service-or-domain>.<event-name>.v<version>`
+# See ADOPT_NOW § 2 for the envelope contract.
+
+topics:
+  # O2C (Wave 1)
+  - name: scm.erp.order-confirmed.v1
+    partitions: 6
+    replication_factor: 1
+    retention_ms: 604800000   # 7 days
+    description: ORDER_CONFIRMED from ERP O2C; consumers: WMS, MRP
+    avro_schema: packages/shared-events/schemas/erp/order-confirmed.v1.avsc
+
+  - name: scm.erp.invoice-generated.v1
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    description: INVOICE_GENERATED from ERP O2C; consumers: Finance, Reporting
+    avro_schema: packages/shared-events/schemas/erp/invoice-generated.v1.avsc
+
+  - name: scm.erp.payment-received.v1
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000
+    description: PAYMENT_RECEIVED; consumers: Finance, Reporting
+    avro_schema: packages/shared-events/schemas/erp/payment-received.v1.avsc
+
+  # P2P (Wave 2)
+  - name: scm.erp.po-approved.v1
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+    description: PO_APPROVED; consumers: WMS (ASN), Compliance (audit trail)
+    avro_schema: packages/shared-events/schemas/erp/po-approved.v1.avsc
+
+  # Platform (Wave 6)
+  - name: scm.platform.tenant-created.v1
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000
+    description: Tenant onboarding complete; consumers: WMS/TMS/QMS/MRP provisioning
+    avro_schema: packages/shared-events/schemas/platform/tenant-created.v1.avsc
+
+  - name: scm.platform.connector-connected.v1
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+    description: Platform connector lifecycle event
+    avro_schema: packages/shared-events/schemas/platform/connector-connected.v1.avsc

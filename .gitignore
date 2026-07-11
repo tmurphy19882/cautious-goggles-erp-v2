@@ -44,3 +44,6 @@ playwright/.cache/
 
 # Supabase / generated
 supabase/.branches/
+
+# Mavis team / plan scratch
+.mavis/plans/

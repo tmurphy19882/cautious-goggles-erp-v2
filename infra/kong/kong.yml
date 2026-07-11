@@ -1,0 +1,54 @@
+# Kong declarative config for ERP v2.
+# Mounts `/api/v1/erp` → `erp-v2:8001` with rate limiting + a `x-tenant-id`
+# header passthrough. W1 adds the JWT-validator plugin; W6 adds the
+# per-tenant feature-flag plugin.
+
+_format_version: "3.0"
+
+services:
+  - name: erp-v2
+    url: http://erp-v2:8001
+    path: /
+    connect_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
+    retries: 3
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 600
+          hour: 10000
+          policy: local
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - X-Forwarded-Proto:https
+
+routes:
+  - name: erp-v2-api
+    service: erp-v2
+    paths:
+      - /api/v1/erp
+    strip_path: false
+    methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          echo_downstream: true
+
+  - name: erp-v2-health
+    service: erp-v2
+    paths:
+      - /health
+      - /ready
+      - /metrics
+    strip_path: false
+    methods:
+      - GET

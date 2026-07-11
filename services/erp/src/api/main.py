@@ -29,7 +29,7 @@ from api import health
 from identity import api as identity_api
 from observability import init_logging, init_metrics, init_tracing
 from observability.middleware import ObservabilityMiddleware
-from shared.db import Base, create_engine, create_session_factory
+from shared.db import create_engine, create_session_factory
 from shared.errors import install_error_handlers
 from shared.idempotency import DbIdempotencyStore, IdempotencyMiddleware
 from shared.schemas import utcnow
@@ -102,8 +102,5 @@ def create_app_v2(
     # Routers
     app.include_router(health.router)
     app.include_router(identity_api.router, prefix="/api/v1/erp")
-
-    # Re-export metadata for tooling that needs it (e.g. Alembic env).
-    app.state.metadata = Base.metadata
 
     return app

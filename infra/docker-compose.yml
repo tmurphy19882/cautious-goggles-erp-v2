@@ -1,0 +1,201 @@
+# Local infra for ERP v2.
+#
+# Two profiles:
+#   core   — just Postgres + Redis (fast local dev; everything else optional)
+#   infra  — full stack: Postgres + Redis + Kafka (Redpanda) + Apicurio +
+#            Keycloak + Kong + OTel collector + Unleash
+#
+# Usage:
+#   docker compose --profile core up -d           # PG + Redis only
+#   docker compose --profile infra up -d         # full stack
+#   docker compose --profile infra logs -f        # tail everything
+#
+# The v2 service itself is built and started by `make run` (or
+# `docker compose --profile infra up erp-v2` once the image is built).
+
+name: erp-v2
+
+x-pg-env: &pg-env
+  POSTGRES_USER: erp
+  POSTGRES_PASSWORD: erp
+  POSTGRES_DB: erp_db
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: erp-postgres
+    profiles: [core, infra]
+    environment:
+      <<: *pg-env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: erp-redis
+    profiles: [core, infra]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redpanda:
+    # Redpanda is a single-binary Kafka replacement — friendlier to
+    # local dev than Confluent's CP images. Wires up the topics from
+    # ./kafka/topics.yaml via the init container.
+    image: redpandadata/redpanda:v23.3.10
+    container_name: erp-redpanda
+    profiles: [infra]
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redpanda-init:
+    image: redpandadata/redpanda:v23.3.10
+    container_name: erp-redpanda-init
+    profiles: [infra]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        echo "Creating Kafka topics from kafka/topics.yaml"
+        # Minimal topic creation loop. Topics file format:
+        #   - name: <topic>
+        #     partitions: <n>
+        #     retention.ms: <ms>
+        # Idempotent: rpk create returns 0 even if the topic exists.
+        rpk topic create erp.events.v1 --partitions 3 --replicas 1 || true
+        rpk topic create erp.outbox.v1  --partitions 3 --replicas 1 || true
+        rpk topic create erp.audit.v1   --partitions 1 --replicas 1 || true
+        rpk topic create erp.cdc.v1     --partitions 3 --replicas 1 || true
+
+  apicurio:
+    image: apicurio/apicurio-registry-mem:2.5.8.final
+    container_name: erp-apicurio
+    profiles: [infra]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: erp-keycloak
+    profiles: [infra]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/erp-v2.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kong:
+    image: kong:3.6
+    container_name: erp-kong
+    profiles: [infra]
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./kong/kong.yml:/etc/kong/kong.yml:ro
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: erp-otel
+    profiles: [infra]
+    command: ["--config=/etc/otel-collector/config.yaml"]
+    volumes:
+      - ./otel/collector-config.yaml:/etc/otel-collector/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  unleash:
+    image: unleashorg/unleash-server:5.11
+    container_name: erp-unleash
+    profiles: [infra]
+    environment:
+      DATABASE_URL: "postgres://erp:erp@postgres:5432/unleash"
+      DATABASE_SSL: "false"
+    ports:
+      - "4242:4242"
+
+  erp-v2:
+    build:
+      context: ../../
+      dockerfile: services/erp/Dockerfile
+    container_name: erp-v2
+    profiles: [infra]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      apicurio:
+        condition: service_healthy
+    environment:
+      ERP_DATABASE_URL: postgresql+asyncpg://erp:erp@postgres:5432/erp_db
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      LOG_LEVEL: INFO
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8001/health', timeout=2).status_code==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
