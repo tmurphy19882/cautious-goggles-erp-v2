@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from api import health
+from crm import api as crm_api
 from finance import api as finance_api
 from identity import api as identity_api
 from master_data import api as master_data_api
@@ -116,5 +117,6 @@ def create_app_v2(
     app.include_router(o2c_api.router, prefix="/api/v1/erp")
     app.include_router(p2p_api.router, prefix="/api/v1/erp")
     app.include_router(finance_api.router, prefix="/api/v1/erp")
+    app.include_router(crm_api.router, prefix="/api/v1/erp")
 
     return app
