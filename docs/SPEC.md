@@ -49,7 +49,6 @@ ERP v2
 │   ├── contract/
 │   ├── activity/
 │   ├── ticket/
-│   └── ai-coach/        # suggest-only, RAG over Party
 ├── hr/                  # employees, departments, payroll hand-off
 ├── legal/               # contracts, clauses, approval workflows
 ├── trade/               # HTS, customs, FTZ, screening (lifted from v1)
@@ -58,7 +57,6 @@ ERP v2
 │   ├── connector/       # OAuth handshake + sync
 │   ├── webhook/         # outbound + inbound
 │   └── import-export/   # CSV/XLSX
-├── ai/                  # agent registry client, RAG client
 ├── observability/       # OTel, metrics, structured logging
 └── shared/              # Pydantic schemas, errors, idempotency, outbox
 ```
@@ -192,17 +190,13 @@ ERP v2
 
 **First wave where Kong shifts default traffic** from `:8010` to `:8001` for affected routes.
 
-## 10. Wave 7 — CRM AI + notifications
 
 **Adds:**
-- `crm/ai-coach/`: Sales Coach agent, suggest-only, RAG over Party + orders + tickets.
 - `crm/notification/`: `NotificationService` (in-app, email, SMS adapters).
 - `crm/saved-view/`: per-role saved views.
 - `crm/custom-field/`: per-tenant schema extension.
-- `ai/registry/`: in-service agent registry client.
 - `ai/rag/`: `document_chunks`, `embeddings`, vector store.
 
-**Audit items closed:** CRM-10..12, AI-2, AI-4, AI-5, S-9, OPS-3, OPS-5, S-6.
 
 ## 11. Wave 8 — HR / Legal
 

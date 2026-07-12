@@ -1,4 +1,4 @@
-"""W7 — CRM AI + notifications + saved views + custom fields.
+"""W7 — CRM notifications + saved views + custom fields.
 
 Happy-path integration tests for the W7 surface.
 """
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from crm.ai import CustomFieldService, NotificationService, SavedViewService
+from crm.productivity import CustomFieldService, NotificationService, SavedViewService
 
 
 pytestmark = pytest.mark.asyncio

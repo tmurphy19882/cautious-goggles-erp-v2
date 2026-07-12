@@ -1,4 +1,4 @@
-"""W7 — CRM AI + notifications + saved views + custom fields — REST routes.
+"""W7 — CRM notifications + saved views + custom fields — REST routes.
 
 Routes:
 - `GET  /notifications` — list for the current user.
@@ -19,10 +19,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_session, get_tenant_id, get_user_id
-from crm.ai import CustomFieldService, NotificationService, SavedViewService
+from crm.productivity import CustomFieldService, NotificationService, SavedViewService
 
 
-router = APIRouter(prefix="", tags=["w7-crm-ai"])
+router = APIRouter(prefix="", tags=["w7-crm-productivity"])
 
 
 # --------------------------------------------------------------------- #

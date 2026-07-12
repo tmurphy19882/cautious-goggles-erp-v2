@@ -96,7 +96,7 @@ failures covered:
 | W4   | Finance / GL (COA, journals, period close, FX, tax) | planned | [`docs/SPEC.md#wave-4`](./docs/SPEC.md#7-wave-4--finance--gl) |
 | W5   | CRM core (contacts, leads, opps, pipeline, quotes) | planned | [`docs/SPEC.md#wave-5`](./docs/SPEC.md#8-wave-5--crm-core) |
 | W6   | Platform / integrations (tenant onboarding, OAuth, webhooks) | planned | [`docs/SPEC.md#wave-6`](./docs/SPEC.md#9-wave-6--platform--integrations) |
-| W7   | CRM AI + notifications (Sales Coach, inbox, saved views) | planned | [`docs/SPEC.md#wave-7`](./docs/SPEC.md#10-wave-7--crm-ai--notifications) |
+| W7   | CRM notifications, inbox, saved views, custom fields | planned | [`docs/SPEC.md#wave-7`](./docs/SPEC.md#10-wave-7--crm-productivity) |
 | W8   | HR / Legal modules (employees, contracts, approvals) | planned | [`docs/SPEC.md#wave-8`](./docs/SPEC.md#11-wave-8--hr--legal) |
 | W9   | Trade polish (HTS auto-resolve, FTZ removal, re-screen) | planned | [`docs/SPEC.md#wave-9`](./docs/SPEC.md#12-wave-9--trade-polish) |
 | W10  | Operational readiness (Avro gate, contract tests, DLQ) | planned | [`docs/SPEC.md#wave-10`](./docs/SPEC.md#13-wave-10--operational-readiness) |

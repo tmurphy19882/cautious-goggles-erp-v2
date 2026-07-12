@@ -1,12 +1,10 @@
-"""W7 — CRM AI + notifications + custom fields + saved views.
+"""W7 — CRM notifications + custom fields + saved views.
 
 W7 ships:
 - `NotificationService` — in-app feed, email/SMS adapters are stubbed.
 - `SavedViewService` — CRUD for per-user list customisations.
 - `CustomFieldService` — CRUD for per-tenant schema extensions.
 
-The Sales Coach/AI agent surface was removed because it was not ready
-for production and caused workflow failures.
 """
 from __future__ import annotations
 

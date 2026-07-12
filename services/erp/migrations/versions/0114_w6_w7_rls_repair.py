@@ -1,19 +1,17 @@
-"""Audit fix — RLS repair for W6 (platform) and W7 (crm_ai) tables.
+"""Audit fix — RLS repair for W6 platform and W7 CRM productivity tables.
 
 Background:
 The W6 and W7 migrations (0109 and 0110) defined the `_rls()` helper
-but never called it in their `upgrade()` bodies, leaving 14
-tenant-scoped tables without RLS. This migration idempotently adds
-RLS to those 14 tables so existing deployments get covered, and so
-fresh installations end up correct.
+but never called it in their `upgrade()` bodies, leaving tenant-scoped
+tables without RLS. This migration idempotently adds RLS so existing
+deployments get covered, and so fresh installations end up correct.
 
 Tables covered:
 - W6 platform (7): tenants, tenant_onboarding_log,
   webhook_subscriptions, webhook_deliveries, payment_intents,
   feature_flags, audit_log.
-- W7 crm_ai (7): notifications, saved_views, custom_field_defs,
-  custom_field_values, ai_agent_runs, ai_recommendations,
-  ai_agent_feedback.
+- W7 CRM productivity (4): notifications, saved_views,
+  custom_field_defs, custom_field_values.
 
 `tenants` is intentionally not RLS-isolated (it IS the tenant);
 we still enable RLS so that callers can read `current_tenant_id`
@@ -74,24 +72,18 @@ def upgrade() -> None:
     ):
         _enable_rls(t)
 
-    # W7 crm_ai
+    # W7 CRM productivity
     for t in (
         "notifications",
         "saved_views",
         "custom_field_defs",
         "custom_field_values",
-        "ai_agent_runs",
-        "ai_recommendations",
-        "ai_agent_feedback",
     ):
         _enable_rls(t)
 
 
 def downgrade() -> None:
     for t in (
-        "ai_agent_feedback",
-        "ai_recommendations",
-        "ai_agent_runs",
         "custom_field_values",
         "custom_field_defs",
         "saved_views",

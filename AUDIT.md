@@ -32,7 +32,6 @@ Every item is sourced. Severity = **P0** (blocks MVP), **P1** (blocks sellable),
 | Procurement (P2P) end-to-end | **Missing** | Requisition → PO → receipt (WMS event) → 3-way match → AP |
 | GL journal posting | **Missing** | Auto-post from SO, PO, AP, AR; manual journal entry |
 | Inventory valuation | **Missing** | FIFO COGS snapshot from WMS on-hand events |
-| CRM pipeline (Leads → Opp → Quote → Contract) | **Missing** | Full funnel with kanban, activity timeline, AI coach |
 | Tickets / Support | **Missing** | SLA, comments, assignment, status |
 | Tasks / Calendar | **Missing** | Per-user, per-record |
 | Notifications center | **Missing** | In-app + email/SMS adapters |
@@ -42,7 +41,6 @@ Every item is sourced. Severity = **P0** (blocks MVP), **P1** (blocks sellable),
 | Finance close | **Missing** | Period close, accruals, FX revaluation |
 | HR module (employees, departments, org) | **Stub (README only)** | Full CRUD + payroll hand-off |
 | Legal module (contracts, approvals) | **Stub (README only)** | Full CRUD + e-sign hook |
-| CRM AI Coach / RAG | **Missing** | Suggest-only agent over Party + orders + tickets |
 | Approval workflow engine | **Missing** | Per-module approval with HITL queue |
 | Temporal sagas (`OrderToCashWorkflow`, `ProcureToPayWorkflow`) | **Missing** (SPEC requires them) | Both wired to live workflows |
 
@@ -137,9 +135,7 @@ Each item: **what you can't do → why → severity → where the gap lives.**
 | CRM-7 | **Log an activity (call, email, meeting)** | No `activities` table | **P1** | `ERP_CRM_GAP_ANALYSIS § 8` |
 | CRM-8 | **Manage a contract** | No `contracts` / `contract_clauses` table | **P1** | same |
 | CRM-9 | **Open and route a support ticket** | No `tickets` / `ticket_comments` table | **P1** | same |
-| CRM-10 | **Run the CRM Sales Coach agent** | Not implemented; relies on RAG over Party + orders, which also doesn't exist | **P1** | `ERP_CRM_GAP_ANALYSIS § 7` |
 | CRM-11 | **Score account health / churn signal** | No signal computation, no model | **P2** | same |
-| CRM-12 | **NL-query the customer timeline** | No RAG over Party events | **P2** | same |
 
 ### 2.6 Trade compliance (HTS / customs / FTZ / screening) — well-developed but integration gaps
 
@@ -203,18 +199,6 @@ The trade module is the *most complete* part of the ERP service (1280 lines acro
 | TEN-4 | **Per-tenant custom fields** | No extension-table pattern | **P2** | `ERP_CRM_GAP_ANALYSIS § 4` |
 | TEN-5 | **Sandbox tenant clone** | No clone/restore flow | **P2** | `ERP_CRM_GAP_ANALYSIS § 3` |
 
-### 2.11 AI / RAG / agents — under ERP
-
-| # | Action you can't perform | Why | Severity | Source |
-|---|---|---|---|---|
-| AI-1 | **Run any agent from the ERP service** | `ai-agents/platform/` is on a branch, not `main`; no in-service registry client | **P0** | `BUILD_STATUS.md` "Agent Platform 5%" |
-| AI-2 | **RAG-query over Party / orders / invoices** | No `document_chunks` / `embeddings` tables, no vector store in service | **P1** | `ERP_CRM_GAP_ANALYSIS § 7` |
-| AI-3 | **Demand-sensing agent (forecast for MRP)** | Lives in legacy monolith; no ERP port | **P1** | same |
-| AI-4 | **CRM Sales Coach (suggest-only)** | Not implemented | **P1** | same |
-| AI-5 | **Finance Insight agent** | Not implemented | **P1** | same |
-| AI-6 | **Inventory Optimization / Procurement agent** | Templates are stubs | **P2** | same |
-| AI-7 | **Capture AI feedback (`ai_feedback`)** | No `ai_feedback` table in service | **P2** | `ERP_CRM_GAP_ANALYSIS § 8` |
-
 ### 2.12 HR / Legal modules — entirely stub
 
 | # | Action you can't perform | Why | Severity | Source |
@@ -270,7 +254,6 @@ Cut for "drop-in merge to `feat/erp-crm` later":
 | **W4 — Finance / GL** | COA, journal entry, auto-post, period close, AR/AP aging, revaluation | FIN-1..14 | Closes O2C/P2P |
 | **W5 — CRM core** | Contacts, leads, opps, pipeline kanban, quotes → SO, activities, 360 view | CRM-1..9 | Wave 1 of CRM module |
 | **W6 — Platform / integrations** | Tenant onboarding, OAuth connector, webhooks, payments, RBAC UI | PL-1..9, RBAC-3..5, FIN-13 | Plumbing |
-| **W7 — CRM AI + notifications** | Sales Coach (suggest), notifications center, saved views, custom fields, tickets | CRM-10..12, AI-2, AI-4, AI-5, OPS-3, OPS-5..6, TEN-3..5 | Stickiness |
 | **W8 — HR / Legal** | Employee CRUD, contract CRUD, approval workflow engine | HR-1..3, LGL-1..3, FIN-11 | Round out ERP modules |
 | **W9 — Trade polish** | HTS auto-resolve, FTZ removal, re-screen on update | TR-3..9 | Operational hardening |
 | **W10 — Operational readiness** | Schema-registry, contract tests, per-tenant metrics, DLQ | S-4, S-7..8, S-17, S-18, S-20, OPS-7 | Production gates |

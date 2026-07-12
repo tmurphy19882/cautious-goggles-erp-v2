@@ -1,7 +1,6 @@
 # Tree — `services/erp/src/crm/` (ERP-CRM v2)
 
 > **Branch of record:** `feat/erp-v2-w0-foundations`
-> **Wave status:** W5 planned, W7 planned (CRM AI / notifications)
 > **Spec section:** [`/docs/SPEC.md#wave-5`](../SPEC.md#8-wave-5-crm-core) and [`#wave-7`](../SPEC.md#10-wave-7-crm-ai--notifications)
 > **Mirror of:** v1 `trees/erp-crm.md` (parent repo), ported to v2 layout
 
@@ -82,9 +81,7 @@ crm/
 │   ├── schemas.py
 │   ├── service.py                     # SLA timer, assignment
 │   └── tests/
-├── ai-coach/                          # W7
 │   ├── api.py                         # POST /ai/coach/suggest
-│   ├── service.py                     # RAG client, prompt, suggest-only
 │   ├── rag/
 │   │   ├── embeddings.py
 │   │   ├── vector_store.py
@@ -132,7 +129,6 @@ ships.
 | `crm/quote/service.py` | `o2c/sales_order/service.py` | `convert_to_so()` creates an SO with the same `party_id` |
 | `crm/contact/service.py` | `master-data/party/service.py` | Contacts are Party rows with a discriminator |
 | `crm/activity/service.py` | `master-data/party/service.py` | Activity log attaches to a Party |
-| `crm/ai-coach/service.py` | `ai/rag/` | RAG index over Party + orders + tickets |
 | `crm/notification/service.py` | `shared/feature_flags.py` | Per-tenant notification toggles |
 
 These are the *only* cross-module edges for CRM; everything else stays
@@ -164,7 +160,6 @@ time.
 | Quote → SO | Cross-service HTTP call (or manual re-entry) | In-process: `quote.service.convert_to_so()` |
 | Activity timeline | Not present | `crm/activity/` joined to Party 360° |
 | Tickets | Stub in v1 | Full W5 module with SLA + comments |
-| AI coach | Missing | `crm/ai-coach/` (W7), RAG over Party + orders + tickets |
 | Notifications | Email-only via SES | `crm/notification/` with in-app + email + SMS adapters (W7) |
 | Saved views | Missing | `crm/saved-view/` (W7) |
 | Custom fields | Missing | `crm/custom-field/` (W7) |
@@ -178,5 +173,4 @@ time.
 |----|-------------|-----------|
 | CRM-1..9 | Full CRM funnel missing | W5 (planned) |
 | CRM-10..12 | Saved views, notifications, custom fields | W7 (planned) |
-| AI-2, AI-4, AI-5 | Sales coach / RAG | W7 (planned) |
 | S-6, S-9, OPS-3, OPS-5 | Cross-cutting gaps | W7 (planned) |

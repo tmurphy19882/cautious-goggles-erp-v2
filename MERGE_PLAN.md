@@ -86,7 +86,7 @@ Every PR into the parent uses this skeleton (lives at
 | W4 Finance/GL | `feat/erp-v2-w4-finance` | `feat(erp-v2): finance/GL (COA, journal, auto-post, period close, AR/AP aging, FX reval, tax)` | Medium | v1 finance untouched |
 | W5 CRM core | `feat/erp-v2-w5-crm-core` | `feat(erp-v2): CRM core (contacts, leads, opps, pipeline, quotes, activities, 360 view)` | Low | Additive |
 | W6 Platform/integrations | `feat/erp-v2-w6-platform` | `feat(erp-v2): platform (tenant onboarding, OAuth, webhooks, payments, RBAC UI)` | **High** | First wave that may displace v1 tenant-onboarding stub |
-| W7 CRM AI + notifications | `feat/erp-v2-w7-crm-ai` | `feat(erp-v2): CRM AI + notifications (Sales Coach, inbox, saved views, custom fields, tickets)` | Low | Additive |
+| W7 CRM productivity | `feat/erp-v2-w7-crm-productivity` | `feat(erp-v2): CRM notifications, inbox, saved views, custom fields, tickets` | Low | Additive |
 | W8 HR / Legal | `feat/erp-v2-w8-hr-legal` | `feat(erp-v2): HR + Legal modules (employees, contracts, approval engine)` | Low | Additive |
 | W9 Trade polish | `feat/erp-v2-w9-trade` | `feat(erp-v2): trade polish (HTS auto-resolve, FTZ removal, re-screen)` | Low | v1 trade keeps working |
 | W10 Operational readiness | `feat/erp-v2-w10-ops` | `chore(erp-v2): Avro gate, contract tests, per-tenant metrics, DLQ` | Low | v1 still on its own OTel path |
