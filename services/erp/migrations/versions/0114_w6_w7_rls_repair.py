@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0114_w6_w7_rls_repair"
@@ -34,28 +33,25 @@ depends_on: str | Sequence[str] | None = None
 SENTINEL = "00000000-0000-0000-0000-000000000000"
 
 
-def _enable_rls(table: str) -> None:
-    """Idempotently enable + force RLS on a table.
-
-    Wraps the steps in a savepoint so a missing policy / table on
-    an older database doesn't fail the whole migration.
+def _tenant_predicate(table: str) -> str:
+    subject = "id" if table == "tenants" else "tenant_id"
+    return f"""
+            {subject} = COALESCE(
+                NULLIF(current_setting('app.tenant_id', true), ''),
+                '{SENTINEL}'
+            )::uuid
     """
+
+
+def _enable_rls(table: str) -> None:
+    """Enable + force RLS on a table with the correct tenant column."""
+    predicate = _tenant_predicate(table)
     op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
     op.execute(f"""
         CREATE POLICY {table}_tenant_isolation ON {table}
-        USING (
-            tenant_id = COALESCE(
-                NULLIF(current_setting('app.tenant_id', true), ''),
-                '{SENTINEL}'
-            )::uuid
-        )
-        WITH CHECK (
-            tenant_id = COALESCE(
-                NULLIF(current_setting('app.tenant_id', true), ''),
-                '{SENTINEL}'
-            )::uuid
-        )
+        USING ({predicate})
+        WITH CHECK ({predicate})
     """)
 
 

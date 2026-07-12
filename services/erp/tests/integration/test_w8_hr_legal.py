@@ -6,9 +6,6 @@ import pytest
 from hr.service import ContractService, ESignService, HRService, render_template
 
 
-pytestmark = pytest.mark.asyncio
-
-
 # --------------------------------------------------------------------- #
 # HR                                                                      #
 # --------------------------------------------------------------------- #
