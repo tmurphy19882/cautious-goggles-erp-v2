@@ -58,7 +58,7 @@ class FTZAdmitBody(BaseModel):
     entry_number: str = Field(min_length=1, max_length=32)
     zone_id: str = Field(min_length=1, max_length=16)
     admission_date: date
-    hts_code: str | None = None
+    hts_code: str = Field(min_length=1, max_length=32)
     quantity: Decimal
     value: Decimal
     unit: str | None = None

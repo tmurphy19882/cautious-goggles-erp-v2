@@ -125,9 +125,14 @@ def _select_idempotency(tenant_id: UUID, key_hash: str):
 class IdempotencyStore:
     """Abstract interface so we can swap to Redis later without changing callers."""
 
-    async def get(self, tenant_id: UUID, key_hash: str) -> IdempotencyRecord | None: ...
-    async def put(self, record: IdempotencyRecord) -> None: ...
-    async def delete_expired(self) -> int: ...
+    async def get(self, tenant_id: UUID, key_hash: str) -> IdempotencyRecord | None:
+        raise NotImplementedError
+
+    async def put(self, record: IdempotencyRecord) -> None:
+        raise NotImplementedError
+
+    async def delete_expired(self) -> int:
+        raise NotImplementedError
 
 
 class DbIdempotencyStore(IdempotencyStore):

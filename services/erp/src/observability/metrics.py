@@ -118,15 +118,3 @@ def reset_metrics_for_testing() -> None:
     global _default, _default_registry
     _default = None
     _default_registry = None
-
-
-def reset_metrics_for_testing() -> None:
-    """Test seam: drop the singleton so the next `metrics()` call re-inits.
-
-    Per-test isolation: the conftest fixture calls this between tests so
-    the per-test registry (with `prometheus_client.CollectorRegistry()`)
-    doesn't accumulate state across the suite.
-    """
-    global _default, _default_registry
-    _default = None
-    _default_registry = None

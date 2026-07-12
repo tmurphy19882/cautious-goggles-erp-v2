@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from contextvars import Token
 from typing import Awaitable, Callable
 from uuid import UUID
 
@@ -96,8 +97,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 
         token_rid = request_id_var.set(request_id)
         token_tid = tenant_id_var.set(tenant_id_str_for_log)
-        token_trace: object | None = None
-        token_span: object | None = None
+        token_trace: Token[str | None] | None = None
+        token_span: Token[str | None] | None = None
 
         ctx = extract(dict(request.headers))
         start = time.perf_counter()
