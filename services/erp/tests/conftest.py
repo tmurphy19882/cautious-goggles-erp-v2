@@ -93,7 +93,19 @@ def _reset_metrics_registry() -> AsyncIterator[None]:
 # ---------- DB session fixtures ----------
 
 def _db_url() -> str | None:
-    return os.environ.get("ERP_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    url = os.environ.get("ERP_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    return _asyncpg_url(url) if url else None
+
+
+def _asyncpg_url(url: str) -> str:
+    """Normalize Postgres URLs to SQLAlchemy's asyncpg driver."""
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql+psycopg2://"):
+        return "postgresql+asyncpg://" + url.removeprefix("postgresql+psycopg2://")
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url.removeprefix("postgresql://")
+    return url
 
 
 async def _create_schema(engine, schema: str) -> None:
@@ -149,7 +161,7 @@ async def pg_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]
         container = PostgresContainer("postgres:16-alpine")
         container.start()
         # asyncpg URL
-        url = container.get_connection_url().replace("postgresql://", "postgresql+asyncpg://")
+        url = _asyncpg_url(container.get_connection_url())
         # Run migrations
         await _run_migrations(url)
         try:
