@@ -114,7 +114,7 @@ async def _run_migrations(database_url: str) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     try:
         subprocess.run(
-            ["alembic", "upgrade", "head"],
+            ["alembic", "-c", "migrations/alembic.ini", "upgrade", "head"],
             cwd=str(repo_root),
             env=env,
             check=True,
