@@ -131,7 +131,6 @@ that module; the **stub** column lists what is there now.
 | `crm/contract/` | `clauses` | W5 | empty package |
 | `crm/activity/` | `timeline` | W5 | empty package |
 | `crm/ticket/` | `sla`, `comments` | W5 | empty package |
-| `crm/ai-coach/` | `suggest`, `rag` | W7 | empty package |
 | `crm/notification/` | `in_app`, `email`, `sms` | W7 | empty package |
 | `crm/saved-view/` | `per_role` | W7 | empty package |
 | `crm/custom-field/` | `per_tenant_schema` | W7 | empty package |

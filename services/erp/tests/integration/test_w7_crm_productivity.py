@@ -1,4 +1,4 @@
-"""W7 — CRM AI + notifications + saved views + custom fields.
+"""W7 — CRM notifications + saved views + custom fields.
 
 Happy-path integration tests for the W7 surface.
 """
@@ -6,13 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from crm.ai import (
-    AgentRunner,
-    CustomFieldService,
-    NotificationService,
-    SalesCoachAgent,
-    SavedViewService,
-)
+from crm.productivity import CustomFieldService, NotificationService, SavedViewService
 
 
 pytestmark = pytest.mark.asyncio
@@ -38,33 +32,6 @@ async def test_w7_notifications_send_and_list(session, tenant_id, user_id):
     await svc.mark_read(tenant_id=tenant_id, notification_id=nid)
     items = await svc.list_for_user(tenant_id=tenant_id, user_id=user_id, unread_only=True)
     assert not any(i["id"] == nid for i in items)
-
-
-async def test_w7_sales_coach_agent_run(session, tenant_id, user_id):
-    runner = AgentRunner(session)
-    rid = await runner.run_agent(
-        agent_key="sales_coach",
-        agent=SalesCoachAgent(),
-        tenant_id=tenant_id,
-        user_id=user_id,
-        subject_type="customer",
-        subject_id=user_id,  # stub
-    )
-    assert rid is not None
-
-    from sqlalchemy import text as _sa_text
-
-    rows = (
-        await session.execute(
-            _sa_text(
-                "SELECT kind, title, confidence FROM ai_recommendations "
-                "WHERE run_id = :rid AND tenant_id = :tid"
-            ),
-            {"rid": rid, "tid": tenant_id},
-        )
-    ).mappings().all()
-    assert len(rows) >= 1
-    assert rows[0]["kind"] == "next_best_action"
 
 
 async def test_w7_saved_views_create_and_list(session, tenant_id, user_id):

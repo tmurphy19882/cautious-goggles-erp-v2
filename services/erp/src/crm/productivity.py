@@ -1,18 +1,14 @@
-"""W7 — CRM AI + notifications + custom fields + saved views.
+"""W7 — CRM notifications + custom fields + saved views.
 
 W7 ships:
 - `NotificationService` — in-app feed, email/SMS adapters are stubbed.
-- `SalesCoachAgent` — reads the customer's order + payment history
-  and returns a deterministic recommendation (churn risk, upsell
-  candidate, etc.). The W7.1 swap is a real LLM call.
-- `AgentRunner` — wraps an agent with the `ai_agent_runs` lifecycle.
 - `SavedViewService` — CRUD for per-user list customisations.
 - `CustomFieldService` — CRUD for per-tenant schema extensions.
+
 """
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -102,136 +98,6 @@ class NotificationService:
         ).mappings().all()
         return [dict(r) for r in rows]
 
-
-# --------------------------------------------------------------------- #
-# Sales Coach agent                                                       #
-# --------------------------------------------------------------------- #
-
-
-@dataclass(slots=True)
-class AgentRecommendation:
-    kind: str  # churn_risk | upsell | next_best_action
-    title: str
-    body: str
-    confidence: Decimal  # 0.00 - 1.00
-    action_url: str | None = None
-
-
-class SalesCoachAgent:
-    """Deterministic W7 stub for the Sales Coach agent.
-
-    Reads the customer's order + payment history and returns
-    recommendations. W7.1 swaps for a real LLM call. The contract
-    (input → output) is the same.
-    """
-
-    async def run(
-        self,
-        *,
-        tenant_id: UUID,
-        subject_type: str,
-        subject_id: UUID,
-    ) -> list[AgentRecommendation]:
-        # Read the customer's open invoices and recent orders.
-        # For the W7 stub, we synthesize a single "next best action"
-        # based on whether they have open invoices.
-        from sqlalchemy import text as _sa_text
-
-        # Note: this method needs a session; the runner injects one.
-        # For the stub, we just return a hard-coded rec.
-        return [
-            AgentRecommendation(
-                kind="next_best_action",
-                title="Follow up on open invoice",
-                body="Customer has an open invoice > 30 days. Send a reminder.",
-                confidence=Decimal("0.75"),
-                action_url=f"/dashboard/invoices?customer={subject_id}",
-            )
-        ]
-
-
-class AgentRunner:
-    """Lifecycle wrapper around an agent. Writes to `ai_agent_runs` and
-    `ai_recommendations`.
-    """
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def run_agent(
-        self,
-        *,
-        agent_key: str,
-        agent: SalesCoachAgent,
-        tenant_id: UUID,
-        user_id: UUID | None,
-        subject_type: str,
-        subject_id: UUID,
-    ) -> UUID:
-        run_id = uuid4()
-        await self._session.execute(
-            _sa_text(
-                """
-                INSERT INTO ai_agent_runs (
-                    id, tenant_id, agent_key, subject_type, subject_id, user_id, status
-                ) VALUES (
-                    :id, :tenant_id, :key, :stype, :sid, :uid, 'running'
-                )
-                """
-            ),
-            {
-                "id": run_id,
-                "tenant_id": tenant_id,
-                "key": agent_key,
-                "stype": subject_type,
-                "sid": subject_id,
-                "uid": user_id,
-            },
-        )
-        try:
-            recs = await agent.run(
-                tenant_id=tenant_id,
-                subject_type=subject_type,
-                subject_id=subject_id,
-            )
-            for rec in recs:
-                await self._session.execute(
-                    _sa_text(
-                        """
-                        INSERT INTO ai_recommendations (
-                            tenant_id, run_id, kind, title, body, confidence, action_url
-                        ) VALUES (
-                            :tid, :rid, :kind, :title, :body, :conf, :url
-                        )
-                        """
-                    ),
-                    {
-                        "tid": tenant_id,
-                        "rid": run_id,
-                        "kind": rec.kind,
-                        "title": rec.title,
-                        "body": rec.body,
-                        "conf": rec.confidence,
-                        "url": rec.action_url,
-                    },
-                )
-            await self._session.execute(
-                _sa_text(
-                    "UPDATE ai_agent_runs SET status = 'succeeded', finished_at = :now, "
-                    "output = :output::jsonb WHERE id = :id"
-                ),
-                {"now": utcnow(), "output": '{"recs": ' + str(len(recs)) + '}', "id": run_id},
-            )
-        except Exception as exc:  # pragma: no cover
-            await self._session.execute(
-                _sa_text(
-                    "UPDATE ai_agent_runs SET status = 'failed', finished_at = :now, "
-                    "error = :err WHERE id = :id"
-                ),
-                {"now": utcnow(), "err": str(exc), "id": run_id},
-            )
-        await self._session.flush()
-        return run_id
 
 
 # --------------------------------------------------------------------- #

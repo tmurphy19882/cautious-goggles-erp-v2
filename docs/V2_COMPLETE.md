@@ -16,7 +16,7 @@
 | W3+W4 | `feat/erp-v2-w3-w4-master-finance` | Master data + finance/GL | 0103, 0104, 0105 | master_data, finance | test_w3_w4 |
 | W5 | `feat/erp-v2-w5-crm-core` | CRM core (leads, opportunities, pipeline, quotes → SO) | 0106, 0107, 0108 | crm | test_w5_crm |
 | W6 | `feat/erp-v2-w6-platform` | Platform (tenant onboarding, webhooks, payments, RBAC) | 0109 | platform | test_w6_platform |
-| W7 | `feat/erp-v2-w7-crm-ai` | CRM AI + notifications + custom fields + saved views | 0110 | crm | test_w7_crm_ai |
+| W7 | `feat/erp-v2-w7-crm-productivity` | CRM notifications + custom fields + saved views | 0110 | crm | test_w7_crm_productivity |
 | W8 | `feat/erp-v2-w8-hr-legal` | HR + Legal (employees, departments, contracts, e-sign) | 0111 | hr | test_w8_hr_legal |
 | W9 | `feat/erp-v2-w9-trade-polish` | Trade polish (HTS auto-resolve, FTZ, screening) | 0112 | trade | test_w9_trade_polish |
 | W10 | `feat/erp-v2-w10-ops-readiness` | Ops (DLQ, per-tenant metrics, event contract gate) | 0113 | ops | test_w10_ops_readiness + test_w10_event_contracts |
@@ -123,7 +123,7 @@ them. None block the W0..W10 happy paths.
 | W3.1 | OpenSearch (replace GIN tsvector) |
 | W5.1 | Lead routing + scoring + analytics |
 | W6.1 | Real OAuth for connectors |
-| W7.1 | Real LLM for Sales Coach |
+
 | W8.1 | Real DocuSign + S3 upload |
 | W9.1 | Real OFAC / BIS / EU feeds |
 | W10.1 | Grafana SLO dashboards |

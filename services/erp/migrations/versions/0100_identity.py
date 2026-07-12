@@ -165,9 +165,6 @@ def upgrade() -> None:
             {"key": "platform.connector.write", "resource": "connector", "action": "write", "description": "Connect / disconnect platforms"},
             {"key": "platform.webhook.read", "resource": "webhook", "action": "read", "description": "Read webhook subscriptions"},
             {"key": "platform.webhook.write", "resource": "webhook", "action": "write", "description": "Create / update webhook subscriptions"},
-            # AI
-            {"key": "ai.agent.run", "resource": "agent", "action": "run", "description": "Trigger an agent run"},
-            {"key": "ai.rag.query", "resource": "rag", "action": "query", "description": "Run a RAG query"},
         ],
     )
 

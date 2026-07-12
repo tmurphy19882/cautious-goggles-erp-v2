@@ -25,19 +25,12 @@ is defined but never called. `downgrade()` references the tables
 but the upgrades don't enable the policy.
 **Fix:** Add `_rls(...)` calls after each `op.create_table` in the
 upgrade, and ship a `0114_w6_w7_rls_repair` alembic that idempotently
-adds RLS to the 14 affected tables (so existing deployments also
+adds RLS to the 11 affected tables (so existing deployments also
 get covered).
-
-### P0-2: W7 CRM AI migration never enables RLS on its 7 tables
-**File:** `services/erp/migrations/versions/0110_w7_crm_ai.py`
-**Impact:** Same as P0-1. `notifications`, `saved_views`,
-`custom_field_defs`, `custom_field_values`, `ai_agent_runs`,
-`ai_recommendations`, `ai_agent_feedback` are unprotected.
-**Fix:** Same as P0-1.
 
 ### P1-1: `api/deps.py` doesn't exist
 **Files (4 imports broken):**
-- `src/crm/ai_api.py:24` — `from api.deps import get_session, get_tenant_id, get_user_id`
+- `src/crm/productivity_api.py:24` — `from api.deps import get_session, get_tenant_id, get_user_id`
 - `src/hr/api.py:24`
 - `src/ops/api.py:24`
 - `src/trade/api.py:24`
@@ -58,13 +51,12 @@ already does it).
 - `src/trade/__init__.py` (missing)
 - `src/ops/__init__.py` (missing)
 
-**Impact:** Even if `api.deps` exists, `from crm.ai import ...` still
+**Impact:** Even if `api.deps` exists, `from crm.productivity import ...` still
 fails because `crm` is not a package to Python. The bug surfaces
 when the user site-path doesn't have a `crm` package collision.
 **Fix:** Add an empty `__init__.py` to each.
 
 ### P1-3: W7-W10 tests use fixtures that don't exist
-**Files:** `tests/integration/test_w7_crm_ai.py`, `test_w8_hr_legal.py`,
 `test_w9_trade_polish.py`, `test_w10_ops_readiness.py`,
 `test_w10_event_contracts.py` — all use `(session, tenant_id, user_id)`.
 
@@ -149,7 +141,7 @@ on the critical path of W6-W10.
 
 1. `ast.parse` every `.py` under `src/` and `tests/` → all parse.
 2. `py -c "from api.main import create_app_v2"` → `ModuleNotFoundError`
-   on `crm.ai_api` → `api.deps` missing (P1-1).
+   on `crm.productivity_api` → `api.deps` missing (P1-1).
 3. `py -m pytest tests/integration/test_w9_trade_polish.py --co -q`
    → `ModuleNotFoundError: No module named 'trade.service'`
    → `__init__.py` missing (P1-2).

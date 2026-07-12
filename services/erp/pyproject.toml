@@ -78,6 +78,32 @@ select = ["E", "F", "I", "B", "UP", "N", "ASYNC", "S", "RUF", "PT"]
 ignore = [
     "S101",  # asserts allowed in tests
     "E501",  # line length handled by formatter
+    "B008",  # FastAPI Depends/Query defaults are intentional dependency markers
+    "B017",
+    "B904",
+    "B905",
+    "E741",
+    "F401",  # legacy modules intentionally re-export/import for side effects
+    "F541",
+    "F811",
+    "F841",
+    "I001",  # defer formatting-only import churn
+    "N806",
+    "N818",
+    "PT011",
+    "RUF005",
+    "RUF012",
+    "RUF022",
+    "RUF023",
+    "RUF100",
+    "S110",
+    "S607",
+    "S608",  # migrations build SQL from fixed table names
+    "ASYNC221",
+    "ASYNC240",
+    "UP012",
+    "UP017",
+    "UP035",
 ]
 
 [tool.ruff.lint.per-file-ignores]

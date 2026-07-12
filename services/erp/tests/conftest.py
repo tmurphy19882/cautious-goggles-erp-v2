@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -92,7 +93,19 @@ def _reset_metrics_registry() -> AsyncIterator[None]:
 # ---------- DB session fixtures ----------
 
 def _db_url() -> str | None:
-    return os.environ.get("ERP_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    url = os.environ.get("ERP_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    return _asyncpg_url(url) if url else None
+
+
+def _asyncpg_url(url: str) -> str:
+    """Normalize Postgres URLs to SQLAlchemy's asyncpg driver."""
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql+psycopg2://"):
+        return "postgresql+asyncpg://" + url.removeprefix("postgresql+psycopg2://")
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url.removeprefix("postgresql://")
+    return url
 
 
 async def _create_schema(engine, schema: str) -> None:
@@ -111,13 +124,21 @@ async def _run_migrations(database_url: str) -> None:
     env = os.environ.copy()
     env["ERP_DATABASE_URL"] = database_url
     repo_root = Path(__file__).resolve().parents[1]
-    subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(repo_root),
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["alembic", "-c", "migrations/alembic.ini", "upgrade", "head"],
+            cwd=str(repo_root),
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.stdout:
+            print(exc.stdout, file=sys.stdout)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        raise
 
 
 # Fixed UUIDs that match migration 0103_seed_tenant.
@@ -140,7 +161,7 @@ async def pg_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]
         container = PostgresContainer("postgres:16-alpine")
         container.start()
         # asyncpg URL
-        url = container.get_connection_url().replace("postgresql://", "postgresql+asyncpg://")
+        url = _asyncpg_url(container.get_connection_url())
         # Run migrations
         await _run_migrations(url)
         try:

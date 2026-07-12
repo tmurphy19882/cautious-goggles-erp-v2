@@ -24,7 +24,6 @@ services/erp/
 │   ├── legal/
 │   ├── trade/                         # HTS, customs, FTZ, screening
 │   ├── platform/                      # tenant onboarding, connectors, webhooks
-│   ├── ai/                            # agent registry + RAG clients
 │   └── api/                           # FastAPI routers
 ├── migrations/versions/               # Alembic
 └── tests/{unit,integration,contract}/

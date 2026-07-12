@@ -94,10 +94,11 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "code", name="uq_parties_tenant_code"),
     )
     op.create_index("ix_parties_kind", "parties", ["tenant_id", "kind"])
+    # GIN trigram index only on text column; tenant filtering uses ix_parties_kind / RLS.
     op.create_index(
         "ix_parties_search",
         "parties",
-        ["tenant_id", "name"],
+        ["name"],
         postgresql_using="gin",
         postgresql_ops={"name": "gin_trgm_ops"},
     )
@@ -168,10 +169,11 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint("tenant_id", "entity_type", "entity_id", name="uq_search_index_entity"),
     )
+    # GIN trigram index only on text column; tenant filtering is covered by RLS.
     op.create_index(
         "ix_search_index_text",
         "search_index",
-        ["tenant_id", "search_text"],
+        ["search_text"],
         postgresql_using="gin",
         postgresql_ops={"search_text": "gin_trgm_ops"},
     )

@@ -60,7 +60,7 @@ follow-ups are scoped as separate PRs:
 | W3.1 | Search engine (replace GIN `tsvector` with OpenSearch) |
 | W5.1 | Lead routing + scoring + lost-reason analytics |
 | W6.1 | Real OAuth for connectors (replace the DocuSign-shaped stub) |
-| W7.1 | Real LLM for the Sales Coach agent |
+
 | W8.1 | Real DocuSign + S3 upload for payroll |
 | W9.1 | Real OFAC / BIS / EU feeds + tariff-engine lookup |
 | W10.1 | Apicurio client + Grafana SLO dashboards |
