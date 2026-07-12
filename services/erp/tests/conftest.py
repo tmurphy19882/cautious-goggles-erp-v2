@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -111,13 +112,21 @@ async def _run_migrations(database_url: str) -> None:
     env = os.environ.copy()
     env["ERP_DATABASE_URL"] = database_url
     repo_root = Path(__file__).resolve().parents[1]
-    subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(repo_root),
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["alembic", "upgrade", "head"],
+            cwd=str(repo_root),
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.stdout:
+            print(exc.stdout, file=sys.stdout)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        raise
 
 
 # Fixed UUIDs that match migration 0103_seed_tenant.
